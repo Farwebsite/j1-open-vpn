@@ -83,6 +83,8 @@ Funcionan en Linux (o WSL); no necesitan el teléfono.
 
 En el teléfono, `tools/j1-toques.py` simula toques y teclas sobre una instancia de prueba de la pantalla y `tools/j1-captura.py` guarda capturas.
 
+Las capturas del README se generan en el teléfono con `tools/capturas.sh`. Usa `tools/demo-pantalla.py`, que sirve las vistas reales con datos inventados, así que nunca aparece la configuración real.
+
 ## Acceso SSH
 
 Se activa desde el panel web ([uso.md → Acceso SSH por USB](uso.md#acceso-ssh-por-usb-opcional)). Para que tu imagen ya lo traiga activado con tu clave, compila con:

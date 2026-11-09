@@ -511,7 +511,8 @@ def cp437(s):
     out=[]
     for ch in str(s):
         if ord(ch)<32:ch=' '
-        if ch=='©':out.append('(c)');continue
+        # not in the screen font
+        if ch in '©→':out.append({'©':'(c)','→':'->'}[ch]);continue
         try:ch.encode('cp437')
         except UnicodeEncodeError:ch=unicodedata.normalize('NFKD',ch).encode('cp437','ignore').decode('cp437')[:1] or '?'
         out.append(ch)
@@ -655,7 +656,7 @@ def ui_res(arg):
         d=os.statvfs('/');s.label('Disco libre: %d MB'%(d.f_bavail*d.f_frsize//1048576))
         s.label('Batería: %.1f °C'%(int(Path('/sys/class/power_supply/battery/temp').read_text())/10),'m')
     except (OSError,KeyError,ValueError):pass
-    return s.small('% de CPU sobre los 4 núcleos. Esta vista solo mide mientras está abierta.','m')
+    return s.small('% de CPU sobre el total de los 2 núcleos (el segundo solo se enciende con carga). Esta vista solo mide mientras está abierta.','m')
 
 BRAND='J1 Open VPN · © 2026 Farweb'
 def ui_home():
@@ -897,7 +898,7 @@ def speed_start():
 
 def ui_speed(arg):
     with LOCK:sp=dict(SPEED)
-    s=Screen('speed','Prueba de velocidad','nav:sys',refresh=1 if sp.get('running') else 0)
+    s=Screen('speed','Velocidad','nav:sys',refresh=1 if sp.get('running') else 0)
     if not sp:
         s.label('Mide la conexión a Internet por el enlace que esté usando el J1 (cable o Wi-Fi).')
         s.small('Tarda unos 25 s y gasta unos 100-200 MB de datos.','m')

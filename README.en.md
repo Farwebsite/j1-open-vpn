@@ -17,6 +17,8 @@ RAM prices are sky-high, so even a small home server costs more and more. Meanwh
 - Automatic port forwarding (UPnP) and Cloudflare dynamic DNS (optional).
 - Measured: ~57 Mbit/s down / ~43 up over cable; ~30 over Wi-Fi (2.4 GHz).
 
+<table><tr><td align="center"><img src="docs/img/inicio.png" width="200" alt="Home"><br><sub>Home</sub></td><td align="center"><img src="docs/img/wireguard.png" width="200" alt="WireGuard"><br><sub>WireGuard</sub></td><td align="center"><img src="docs/img/qr.png" width="200" alt="QR for the app"><br><sub>QR for the app</sub></td></tr></table>
+
 ## Install (short version)
 
 1. Only for the **SM-J100H** (j13g). Other J1 models use different hardware.
