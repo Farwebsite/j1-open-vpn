@@ -21,7 +21,7 @@ Vistas del inicio:
 - **Recursos:** CPU total y por proceso, RAM, disco, tráfico y temperatura.
 - **Pantalla:** brillo (deslizador) y tiempo de apagado. En los últimos segundos se atenúa; un toque la recupera.
 - **Registros:** sistema, red, VPN y kernel.
-- **Sistema:** encendido, carga, RAM, **prueba de velocidad**, reiniciar y apagar.
+- **Sistema:** encendido, carga, RAM, **zona horaria**, **prueba de velocidad**, reiniciar y apagar.
 
 Con la pantalla apagada se borra la memoria de vídeo: un código QR no se queda guardado.
 
@@ -102,7 +102,16 @@ Por Wi-Fi la VPN rinde menos de lo que marca la prueba: cada dato entra y sale p
 
 ## Zona horaria
 
-Viene la de España peninsular (`CET-1CEST,M3.5.0,M10.5.0/3`). Para cambiarla hace falta [acceso SSH](#acceso-ssh-por-usb-opcional): escribe la cadena TZ en `/etc/j1/tz` y reinicia. Ejemplos: Canarias o Portugal `WET0WEST,M3.5.0/1,M10.5.0`; México `CST6`; Argentina `ART3`.
+Viene la de España peninsular. Para cambiarla:
+
+- En la pantalla: **Sistema → Zona horaria** y toca la tuya.
+- En el panel web: sección **Zona horaria** → elige y *Guardar zona horaria*.
+
+Zonas disponibles: España y Europa central, Canarias y Portugal, Reino Unido e Irlanda, Europa del este, México, Colombia/Perú/Ecuador, Venezuela/Bolivia, Chile, Argentina/Uruguay, EE. UU. este y pacífico, y UTC. El horario de verano es automático.
+
+El cambio se aplica al momento: el reloj de la pantalla, la web y los registros pasan a la hora nueva sin reiniciar. Solo el registro del kernel sigue con la zona anterior hasta el siguiente arranque.
+
+Para una zona que no está en la lista, con [acceso SSH](#acceso-ssh-por-usb-opcional) escribe su cadena TZ POSIX en `/etc/j1/tz` (por ejemplo `<+0545>-5:45` para Nepal) y reinicia.
 
 ## Dónde se guarda todo
 

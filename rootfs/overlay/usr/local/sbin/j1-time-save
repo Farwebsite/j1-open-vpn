@@ -1,5 +1,6 @@
 #!/bin/busybox sh
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+tz=$(cat /etc/j1/tz 2>/dev/null) && [ -n "$tz" ] && export TZ="$tz"
 year=$(date -u +%Y)
 [ "$year" -ge 2024 ] || exit 0
 hwclock -w -u 2>/dev/null || true

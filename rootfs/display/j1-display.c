@@ -15,6 +15,7 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/un.h>
 #include <linux/fb.h>
 #include <linux/input.h>
@@ -353,6 +354,17 @@ static void show_page0(void) {
 	}
 }
 static void present(void) { memcpy(mem, backbuf, (size_t)SH * f.line_length); }
+/* the time zone can change while running (web.py rewrites /etc/j1/tz) */
+static void tz_follow(void) {
+	static time_t seen_t = -1; static ino_t seen_i;
+	struct stat st; char tz[96];
+	if (stat("/etc/j1/tz", &st) < 0 || (st.st_mtime == seen_t && st.st_ino == seen_i)) return;
+	seen_t = st.st_mtime; seen_i = st.st_ino;
+	FILE *f = fopen("/etc/j1/tz", "r");
+	if (!f) return;
+	if (fgets(tz, sizeof tz, f)) { tz[strcspn(tz, "\n")] = 0; if (*tz) { setenv("TZ", tz, 1); tzset(); } }
+	fclose(f);
+}
 static void render(void) {
 	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
 	clip0 = TOP; clip1 = TOP + view_h();
@@ -437,7 +449,9 @@ static void render(void) {
 	int tx = PAD;
 	if (back[0]) { if (pressed == -2) rrect(6, 6, 60, TOP - 12, 12, C_DOWN); text(20, 14, "<", 2, C_ACC); tx = 76; }
 	/* top right: battery and clock */
-	char clock[16], bat[8] = "", st[16] = ""; time_t t = time(NULL); strftime(clock, sizeof clock, "%H:%M", localtime(&t));
+	char clock[16], bat[8] = "", st[16] = ""; time_t t = time(NULL);
+	tz_follow();
+	strftime(clock, sizeof clock, "%H:%M", localtime(&t));
 	FILE *in = fopen("/sys/class/power_supply/battery/capacity", "r");
 	if (in) { if (fgets(bat, sizeof bat, in)) bat[strcspn(bat, "\n")] = 0; fclose(in); }
 	if ((in = fopen("/sys/class/power_supply/battery/status", "r"))) { if (!fgets(st, sizeof st, in)) st[0] = 0; fclose(in); }

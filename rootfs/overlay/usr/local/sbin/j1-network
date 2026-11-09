@@ -57,6 +57,8 @@ while :; do
   log 'Configuracion IP aplicada'
  fi
  now=$(cut -d. -f1 /proc/uptime)
+ # time zone changed from the screen or the web: logs and children follow
+ tz=$(cat /etc/j1/tz 2>/dev/null) && [ -n "$tz" ] && [ "$tz" != "$TZ" ] && export TZ="$tz"
  host=$(cat $P/j1_host_active 2>/dev/null)
  if [ "$host" = 0 ] && [ "$last_host" != 0 ] && [ "$(cat $P/j1_boost_on)" = 0 ]; then
   echo 4 >/sys/bus/i2c/devices/3-0049/SM5701_core 2>/dev/null

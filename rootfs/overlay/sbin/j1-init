@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 # Spanish time (CET/CEST) for logs and the screen clock; override in /etc/j1/tz
+# (web.py and the screen change it at runtime; see TZ_ZONES in web.py)
 export TZ="$(cat /etc/j1/tz 2>/dev/null || echo CET-1CEST,M3.5.0,M10.5.0/3)"
 umask 077
 for source in /usr/share/j1/defaults/*; do

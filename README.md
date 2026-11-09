@@ -21,6 +21,7 @@ El Galaxy J1 de 2015 (2 núcleos a 1,2 GHz, 512 MB de RAM) no sirve ya como móv
 - **Apertura automática del puerto** en el router (UPnP) y **DNS dinámico** con Cloudflare (opcional).
 - **Red Wi-Fi propia de configuración** (`DIRECT-J1-VPN-XXXX`) para configurarlo sin cables.
 - **SSH por USB opcional** (solo con clave), activable desde el panel web.
+- **Zona horaria** seleccionable desde la pantalla o la web (España, Canarias, Latinoamérica, EE. UU.…).
 - Consumo de CPU nulo en reposo: la pantalla no gasta nada cuando está apagada.
 
 Medido en el dispositivo de desarrollo: **~57 Mbit/s de bajada y ~43 de subida por cable**, ~30 Mbit/s por Wi-Fi (2,4 GHz).

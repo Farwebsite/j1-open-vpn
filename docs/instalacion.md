@@ -147,6 +147,6 @@ Para ordenadores: desde el panel web (http://192.168.78.1 o por USB http://192.1
 
 - **Nombre de dominio** en vez de IP (útil si tu IP pública cambia): [uso.md → Cloudflare](uso.md#dns-dinámico-con-cloudflare).
 - **Cable de red** por USB: [uso.md → Cable](uso.md#cable-de-red-usb).
-- **Zona horaria:** viene la de España peninsular; para otra, ver [uso.md → Zona horaria](uso.md#zona-horaria).
+- **Zona horaria:** viene la de España peninsular. Para otra: en la pantalla, **Sistema → Zona horaria** (o en el panel web).
 
 Listo. El J1 puede quedarse siempre enchufado al cargador: la batería hace de SAI si se va la luz.

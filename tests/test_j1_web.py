@@ -91,6 +91,23 @@ class Tests(unittest.TestCase):
   self.assertEqual(app.wifi_qr_text('Mi;Red','a"b\\c:d'),'WIFI:T:WPA;S:Mi\\;Red;P:a\\"b\\\\c\\:d;;')
   self.assertEqual(app.wifi_qr_text('Libre',''),'WIFI:T:nopass;S:Libre;;')
   app.wifi_save({'ssid':'Casa ñ','password':'safe"pass\\word'});self.assertEqual(app.client_wifi(),('Casa ñ','safe"pass\\word'))
+ def test_time_zone(self):
+  import os,time
+  old=os.environ.get('TZ')
+  try:
+   self.assertEqual(app.tz_get(),app.TZ_DEFAULT);self.assertEqual(app.tz_name(),'España, Europa central')
+   self.assertIn(b'nav:tz\tZona horaria: Espa',app.ui_request(b'a=nav%3Asys'))
+   for bad in (b'tz.set%3A99',b'tz.set%3A-1',b'tz.set%3Ax'):self.assertIn(b'\te\n',app.ui_request(b'a='+bad+b'&s=tz'))
+   out=app.ui_request(b'a=tz.set%3A1&s=tz');self.assertIn(b'> Canarias, Portugal\tp',out)
+   self.assertEqual((app.STATE/'tz').read_text(),'WET0WEST,M3.5.0/1,M10.5.0\n');self.assertEqual(os.environ['TZ'],'WET0WEST,M3.5.0/1,M10.5.0')
+   self.assertEqual(time.strftime('%z'),'+0000' if not time.localtime().tm_isdst else '+0100')
+   (app.STATE/'tz').write_text('<+0545>-5:45\n');self.assertEqual(app.tz_name(),'Personalizada (<+0545>-5:45)')
+   app.save('vpn.json',{'port':51820,'endpoint':'','private_key':'S','public_key':'P','clients':[]})
+   page=app.page();self.assertIn(b'id=hora',page);self.assertIn(b'<option value=11>UTC</option>',page)
+  finally:
+   if old is None:os.environ.pop('TZ',None)
+   else:os.environ['TZ']=old
+   time.tzset()
  def test_ssh_keys(self):
   self.assertEqual(app.ssh_keys(),[]);self.assertIn('Desactivado',app.ssh_section())
   for bad in ('','hola','ssh-ed25519','ssh-ed25519 AAAA\nssh-rsa BBBB','ssh-dss AAAAB3'):

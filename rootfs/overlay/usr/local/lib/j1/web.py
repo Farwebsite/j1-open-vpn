@@ -416,10 +416,15 @@ def ssh_disable():
         try:(STATE/'authorized_keys').unlink()
         except FileNotFoundError:pass
     log('SSH por USB desactivado')
+def tz_section():
+    cur=tz_get()
+    opts=''.join('<option value=%d%s>%s</option>'%(i,' selected' if z==cur else '',esc(n)) for i,(n,z) in enumerate(TZ_ZONES))
+    return ('<section id=hora><h2>Zona horaria</h2><p>'+esc(tz_name(cur))+' · ahora '+time.strftime('%H:%M')+'</p><form method=post>'+hidden()+
+        '<input type=hidden name=action value=tz><select name=zone>'+opts+'</select><button>Guardar zona horaria</button></form></section>')
 def ssh_section():
     n=len(ssh_keys())
     state='Activo: %d clave%s autorizada%s.'%(n,'' if n==1 else 's','' if n==1 else 's') if n else 'Desactivado (ninguna clave autorizada).'
-    return ('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
+    return tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshgen><button>Generar una clave y descargarla</button><small>Guarda el archivo descargado: es la llave para entrar y no se puede volver a descargar.</small></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshadd><label>O pega tu clave pública (id_ed25519.pub)<textarea name=key rows=3 maxlength=1000></textarea></label><button>Añadir clave pública</button></form>'
         +('<form method=post>'+hidden()+'<input type=hidden name=action value=sshoff><button class=danger>Desactivar SSH (borrar todas las claves)</button></form>' if n else '')+'</section>')
@@ -429,7 +434,7 @@ def page(message=''):
     v=ensure_vpn_state();cf=load('cloudflare.json',{})
     try:wifi=(RUN/'wifi-summary').read_text().strip()
     except FileNotFoundError:wifi='Sin configurar'
-    out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>J1 VPN</title><style>'+CSS+'</style><h1>J1 · Servidor VPN</h1><nav><a href="#wifi">Wi-Fi</a><a href="#usb">Cable</a><a href="#vpn">WireGuard</a><a href="#dns">Cloudflare</a><a href="#ssh">SSH</a></nav>']
+    out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>J1 VPN</title><style>'+CSS+'</style><h1>J1 · Servidor VPN</h1><nav><a href="#wifi">Wi-Fi</a><a href="#usb">Cable</a><a href="#vpn">WireGuard</a><a href="#dns">Cloudflare</a><a href="#hora">Hora</a><a href="#ssh">SSH</a></nav>']
     if message:out.append('<p class=notice role=status>'+esc(message)+'</p>')
     out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
@@ -489,6 +494,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 key=ssh_generate()
                 self.respond(key,content='application/octet-stream',filename='j1-open-vpn-ssh-key');return
             elif action=='sshadd':ssh_add(f.get('key',''));message='Clave añadida. Ya puedes entrar por USB: ssh root@192.168.77.1'
+            elif action=='tz':message='Zona horaria: '+tz_set(f.get('zone',''))
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
             elif action=='dns':
                 dns_settings(f.get('enabled')=='1',f.get('hostname',''),f.get('zone_id',''),f.get('token',''))
@@ -597,6 +603,42 @@ def ui_wifiqr(which):
         ssid,pw=net;s=Screen('wifiqr:client','QR · '+ssid,'nav:wifi')
     s.add('Q',','.join(qr_rows(wifi_qr_text(ssid,pw))))
     return s.small('Cámara del móvil: apunta al código para conectarte a '+ssid,'m')
+
+# Time zone: POSIX TZ strings (no tzdata needed). Stored in /etc/j1/tz, read by
+# j1-init at boot; web.py, j1-display, j1-network and j1-time-save pick a
+# change up at once, so no restart is needed.
+TZ_DEFAULT='CET-1CEST,M3.5.0,M10.5.0/3'
+TZ_ZONES=(('España, Europa central','CET-1CEST,M3.5.0,M10.5.0/3'),
+          ('Canarias, Portugal','WET0WEST,M3.5.0/1,M10.5.0'),
+          ('Reino Unido, Irlanda','GMT0BST,M3.5.0/1,M10.5.0'),
+          ('Europa del este, Grecia','EET-2EEST,M3.5.0/3,M10.5.0/4'),
+          ('México','CST6'),
+          ('Colombia, Perú, Ecuador','<-05>5'),
+          ('Venezuela, Bolivia','<-04>4'),
+          ('Chile','<-04>4<-03>,M9.1.6/24,M4.1.6/24'),
+          ('Argentina, Uruguay','<-03>3'),
+          ('EE. UU. este (Nueva York)','EST5EDT,M3.2.0,M11.1.0'),
+          ('EE. UU. pacífico (Los Ángeles)','PST8PDT,M3.2.0,M11.1.0'),
+          ('UTC','UTC0'))
+def tz_get():
+    try:return (STATE/'tz').read_text().strip() or TZ_DEFAULT
+    except OSError:return TZ_DEFAULT
+def tz_name(tz=None):
+    tz=tz or tz_get()
+    return next((n for n,z in TZ_ZONES if z==tz),'Personalizada ('+tz+')')
+def tz_set(i):
+    i=int(i) if str(i).isdigit() else -1
+    if not 0<=i<len(TZ_ZONES):raise ValueError('Zona horaria no válida')
+    name,tz=TZ_ZONES[i]
+    atomic(STATE/'tz',tz+'\n',0o644)
+    os.environ['TZ']=tz;time.tzset()
+    log('Zona horaria: '+name)
+    return name
+
+def ui_tz(arg):
+    cur=tz_get();s=Screen('tz','Zona horaria','nav:sys').label('Hora: '+time.strftime('%H:%M'),'g')
+    for i,(n,z) in enumerate(TZ_ZONES):s.button('tz.set:%d'%i,('> ' if z==cur else '')+n,'p' if z==cur else 'i')
+    return s.small('El reloj de la pantalla, la web y los registros cambian al momento. El horario de verano es automático.','m')
 
 DISPLAY_TIMES=((15,'15 segundos'),(60,'1 minuto'),(120,'2 minutos'),(300,'5 minutos'),(600,'10 minutos'),(0,'Siempre encendida'))
 def display_timeout():
@@ -836,6 +878,7 @@ def ui_sys(arg):
         s.label('RAM libre: %d / %d MB'%(mem.get('MemAvailable',mem.get('MemFree',0))//1024,mem['MemTotal']//1024))
     except (OSError,KeyError,ValueError):pass
     s.label('Kernel '+os.uname().release,'m').small(BRAND,'m')
+    s.button('nav:tz','Zona horaria: '+tz_name(),'i')
     s.button('nav:speed','Prueba de velocidad','i')
     return s.button('nav:reboot','Reiniciar J1','d','power').button('nav:poweroff','Apagar J1','d','power')
 
@@ -926,7 +969,7 @@ def ui_power(arg):
 
 UI_SCREENS={'home':lambda a:ui_home(),'wifi':ui_wifi,'wifinet':ui_wifinet,'wifihidden':ui_wifihidden,'ap':ui_ap,
     'ip':ui_ip,'vpn':ui_vpn,'client':ui_client,'qr':ui_qr,'del':ui_del,'dns':ui_dns,'usb':ui_usb,'logs':ui_logs,
-    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed}
+    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz}
 
 def ui_action(a, f):
     """Runs a screen action; returns (next screen, message)."""
@@ -955,6 +998,7 @@ def ui_action(a, f):
         elif verb.startswith('dns6'):dns_settings(bool(cf.get('enabled')),cf.get('hostname',''),cf.get('zone_id',''),'',verb=='dns6.on')
         else:dns_settings(verb=='dns.on',cf.get('hostname',''),cf.get('zone_id',''),'')
         return 'dns','Cloudflare guardado'
+    if verb=='tz.set':return 'tz','Zona horaria: '+tz_set(arg)
     if verb=='disp.set':
         t=int(arg) if arg.isdigit() else -1
         if t not in dict(DISPLAY_TIMES):raise ValueError('Tiempo no válido')
