@@ -42,7 +42,7 @@ app.SPEED.update(link='cable (eth0)', ping='9 ms', down='56.8 Mbit/s', up='43.2 
 
 dump = ['priv\tpub\t51820\toff'] + [
     '%s\tpsk\t%s\t10.66.0.%d/32\t%d\t%d\t%d\toff' % (c['public_key'], ep, c['ip'], hs, rx, tx)
-    for c, ep, hs, rx, tx in zip(clients, ('85.48.12.7:41622', '(none)', '(none)'),
+    for c, ep, hs, rx, tx in zip(clients, ('203.0.113.25:41622', '(none)', '(none)'),
                                  (now - 40, now - 7200, 0), (52_400_000, 8_100_000, 0),
                                  (1_310_000_000, 96_000_000, 0))]
 def command(args, data=None, timeout=15):
