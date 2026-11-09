@@ -1,0 +1,197 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+last_state=unknown
+last_ap_error=0
+# adopt the wlan0 udhcpc of a previous instance (restart without reboot)
+dhcp_pid=$(cat /run/udhcpc.pid 2>/dev/null)
+log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>/run/appliance.log; }
+# shared address: when ip-eth.conf and ip-wlan0.conf hold the same IP only one
+# link uses it, so the router needs a single port forward. The cable owns it
+# while it has carrier and Internet; the Wi-Fi client waits disconnected and
+# takes the address back when the cable goes or loses Internet (retried later).
+# If the Wi-Fi has no Internet either (the router itself is offline) the cable
+# takes the address back and keeps it until Internet returns (hold_cable).
+shared_check() {
+ shared=
+ [ -f /etc/j1/ip-eth.conf ] && [ -f /etc/j1/ip-wlan0.conf ] || return
+ [ "$(. /etc/j1/ip-eth.conf; echo $ip)" = "$(. /etc/j1/ip-wlan0.conf; echo $ip)" ] && shared=1
+}
+shared_check
+cable_bad_until=0
+cable_fails=0
+next_inet=0
+wifi_fails=0
+failed_at=0
+hold_cable=
+# A crash while the J1 powers an adapter leaves the SM5701 charger in OTG mode
+# (5 V out, no charging) and the kernel no longer knows: VBUS then hides any new
+# OTG adapter. With no adapter hosted, put it back in charger mode at start and
+# whenever host mode ends.
+P=/sys/module/dwc_otg/parameters
+last_host=unknown
+# fixed address from /etc/j1/ip-*.conf (written by web.py), applied through
+# the same udhcpc script as a DHCP lease
+ipstatic() {
+ ( . "$2"; interface=$1 ip=$ip subnet=$subnet router=$router dns="$dns" static=1 /usr/local/sbin/j1-udhcpc bound ) && : >/run/static-$1
+}
+while :; do
+ if [ -f /run/wifi-reconfigure ]; then
+  rm -f /run/wifi-reconfigure
+  wpa_cli -i wlan0 -p /run/wpa_supplicant reconfigure >/run/wifi-reconfigure-result 2>&1
+  log 'Nueva configuracion Wi-Fi'
+ fi
+ if [ -f /run/ip-reconfigure ]; then
+  rm -f /run/ip-reconfigure
+  [ -z "$dhcp_pid" ] || kill "$dhcp_pid" 2>/dev/null
+  dhcp_pid=
+  for path in /sys/class/net/wlan0 /sys/class/net/eth* /sys/class/net/usb*; do
+   [ -e "$path" ] || continue
+   dev=${path##*/}
+   pid=$(cat /run/udhcpc-$dev.pid 2>/dev/null)
+   [ -z "$pid" ] || kill "$pid" 2>/dev/null
+   rm -f /run/udhcpc-$dev.pid /run/static-$dev
+   interface=$dev /usr/local/sbin/j1-udhcpc deconfig
+  done
+  shared_check
+  cable_bad_until=0
+  log 'Configuracion IP aplicada'
+ fi
+ now=$(cut -d. -f1 /proc/uptime)
+ host=$(cat $P/j1_host_active 2>/dev/null)
+ if [ "$host" = 0 ] && [ "$last_host" != 0 ] && [ "$(cat $P/j1_boost_on)" = 0 ]; then
+  echo 4 >/sys/bus/i2c/devices/3-0049/SM5701_core 2>/dev/null
+ fi
+ last_host=$host
+ # the cable holds the shared address: Wi-Fi client in standby
+ standby=
+ if [ -n "$shared" ]; then
+  for mark in /run/static-eth* /run/static-usb*; do [ -e "$mark" ] && standby=1; done
+ fi
+ state=$(wpa_cli -i wlan0 -p /run/wpa_supplicant status 2>/dev/null | sed -n 's/^wpa_state=//p')
+ # Wi-Fi client switched off from the screen (the config AP keeps running)
+ if [ -f /etc/j1/wifi-off ] || [ -n "$standby" ]; then
+  case "$state" in DISCONNECTED|INTERFACE_DISABLED|'') ;; *) wpa_cli -i wlan0 -p /run/wpa_supplicant disconnect >/dev/null 2>&1 ;; esac
+ elif [ "$state" = DISCONNECTED ]; then
+  wpa_cli -i wlan0 -p /run/wpa_supplicant reconnect >/dev/null 2>&1
+ fi
+ if [ "$state" != "$last_state" ]; then
+  log "Wi-Fi: ${state:-no disponible}"
+  last_state=$state
+  # radio power saving adds 20-80 ms to the VPN; the driver turns it back on per connection
+  [ "$state" = COMPLETED ] && iw dev wlan0 set power_save off 2>/dev/null
+ fi
+ if [ "$state" = COMPLETED ]; then
+  if [ -f /etc/j1/ip-wlan0.conf ]; then
+   [ -f /run/static-wlan0 ] || ipstatic wlan0 /etc/j1/ip-wlan0.conf
+  elif [ -z "$dhcp_pid" ] || ! kill -0 "$dhcp_pid" 2>/dev/null; then
+   udhcpc -f -i wlan0 -s /usr/local/sbin/j1-udhcpc -p /run/udhcpc.pid -t 3 -T 3 >/run/udhcpc.log 2>&1 </dev/null &
+   dhcp_pid=$!
+  fi
+ else
+  if [ -n "$dhcp_pid" ]; then kill "$dhcp_pid" 2>/dev/null; dhcp_pid=; fi
+  if [ -f /run/static-wlan0 ]; then rm -f /run/static-wlan0; interface=wlan0 /usr/local/sbin/j1-udhcpc deconfig; fi
+  if [ -f /etc/j1/wifi-off ]; then
+   printf 'Wi-Fi: apagada\n' >/run/wifi-summary
+  elif [ -n "$standby" ]; then
+   printf 'Wi-Fi: en reserva (la IP la usa el cable)\n' >/run/wifi-summary
+  else
+   printf 'Wi-Fi: %s\n' "${state:-no disponible}" >/run/wifi-summary
+  fi
+ fi
+ # USB Ethernet (adapter through OTG): one udhcpc per interface while it exists
+ for path in /sys/class/net/eth* /sys/class/net/usb*; do
+  [ -e "$path" ] || continue
+  dev=${path##*/}
+  if [ -n "$shared" ]; then
+   if [ -f /run/static-$dev ]; then
+    lost=
+    if [ "$(cat $path/carrier 2>/dev/null)" != 1 ]; then
+     lost='Cable: sin enlace, paso a la Wi-Fi'; hold_cable=
+    elif [ "$now" -ge "$next_inet" ]; then
+     next_inet=$((now + 15))
+     if ping -c 1 -W 3 -I "$dev" 1.1.1.1 >/dev/null 2>&1 || ping -c 1 -W 3 -I "$dev" 8.8.8.8 >/dev/null 2>&1; then
+      if [ -n "$hold_cable" ]; then
+       hold_cable=
+       (. /etc/j1/ip-eth.conf; printf 'Cable: %s (IP fija)\n' "$ip") >/run/eth-summary
+       log 'Internet ha vuelto por el cable'
+      fi
+      cable_fails=0
+     else
+      cable_fails=$((cable_fails + 1))
+      if [ -n "$hold_cable" ]; then
+       # nothing better to switch to: stay on the cable until Internet returns
+       [ "$cable_fails" != 3 ] || printf 'Cable: sin Internet (la Wi-Fi tampoco tiene), esperando\n' >/run/eth-summary
+      elif [ "$cable_fails" -ge 3 ]; then
+       # three failed checks (~45 s): Wi-Fi takes over, the cable is retried in 10 min
+       lost='Cable: sin Internet, paso a la Wi-Fi'; cable_bad_until=$((now + 600)); failed_at=$now; wifi_fails=0
+      fi
+     fi
+    fi
+    [ -z "$lost" ] && continue
+    rm -f /run/static-$dev; interface=$dev /usr/local/sbin/j1-udhcpc deconfig
+    printf '%s\n' "$lost" >/run/eth-summary
+    log "$lost"
+    continue
+   fi
+   carrier=$(cat $path/carrier 2>/dev/null)
+   [ "$carrier" = 1 ] || { ip link set "$dev" up; cable_bad_until=0; hold_cable=; }
+   if [ "$carrier" = 1 ] && [ "$now" -lt "$cable_bad_until" ]; then
+    # the Wi-Fi took over: it gets 60 s to connect and must answer pings
+    if [ -f /run/static-wlan0 ]; then
+     if [ "$now" -ge "$next_inet" ]; then
+      next_inet=$((now + 15))
+      if ping -c 1 -W 3 -I wlan0 1.1.1.1 >/dev/null 2>&1 || ping -c 1 -W 3 -I wlan0 8.8.8.8 >/dev/null 2>&1; then
+       wifi_fails=0
+      else
+       wifi_fails=$((wifi_fails + 1))
+      fi
+     fi
+    elif [ "$now" -ge $((failed_at + 60)) ]; then
+     wifi_fails=3
+    fi
+    if [ "$wifi_fails" -ge 3 ]; then
+     hold_cable=1; cable_bad_until=0
+     log 'Wi-Fi tampoco tiene Internet: vuelvo al cable'
+    fi
+   fi
+   [ "$carrier" = 1 ] && [ "$now" -ge "$cable_bad_until" ] || continue
+   if [ -f /run/static-wlan0 ]; then rm -f /run/static-wlan0; interface=wlan0 /usr/local/sbin/j1-udhcpc deconfig; fi
+   wpa_cli -i wlan0 -p /run/wpa_supplicant disconnect >/dev/null 2>&1
+   log "Cable: $dev toma la IP compartida, Wi-Fi en reserva"
+   ipstatic "$dev" /etc/j1/ip-eth.conf
+   cable_fails=0; wifi_fails=0; next_inet=$((now + 15))
+   [ -z "$hold_cable" ] || printf 'Cable: sin Internet (la Wi-Fi tampoco tiene), esperando\n' >/run/eth-summary
+   continue
+  fi
+  if [ -f /etc/j1/ip-eth.conf ]; then
+   [ -f /run/static-$dev ] && continue
+   log "Cable: $dev conectado (IP fija)"
+   ip link set "$dev" up
+   ipstatic "$dev" /etc/j1/ip-eth.conf
+   continue
+  fi
+  pid=$(cat /run/udhcpc-$dev.pid 2>/dev/null)
+  if [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+   drv=$(basename "$(readlink $path/device/driver 2>/dev/null)")
+   log "Cable: $dev conectado (${drv:-?})"
+   ip link set "$dev" up
+   udhcpc -f -i "$dev" -s /usr/local/sbin/j1-udhcpc -p /run/udhcpc-$dev.pid -t 3 -T 3 >/run/udhcpc-$dev.log 2>&1 </dev/null &
+  fi
+ done
+ for mark in /run/udhcpc-eth*.pid /run/udhcpc-usb*.pid /run/static-eth* /run/static-usb*; do
+  [ -e "$mark" ] || continue
+  dev=${mark#/run/udhcpc-}; dev=${dev#/run/static-}; dev=${dev%.pid}
+  [ -e /sys/class/net/$dev ] && continue
+  case "$mark" in *.pid) kill "$(cat "$mark")" 2>/dev/null ;; esac
+  rm -f "$mark" /run/dns-$dev
+  printf 'Cable: desconectado\n' >/run/eth-summary
+  log "Cable: $dev desconectado"
+ done
+ if /usr/local/sbin/j1-ap-ensure; then
+  last_ap_error=0
+ elif [ "$last_ap_error" = 0 ]; then
+  log 'AP: esperando al controlador'
+  last_ap_error=1
+ fi
+ sleep 3
+done

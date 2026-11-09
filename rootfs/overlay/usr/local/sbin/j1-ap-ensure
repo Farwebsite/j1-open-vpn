@@ -1,0 +1,38 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+# config AP switched off from the screen
+if [ -f /etc/j1/ap-off ]; then
+ go=$(iw dev | awk '/Interface /{n=$2} /type P2P-GO/{print n;exit}')
+ if [ -n "$go" ]; then
+  wpa_cli -i wlan0 -p /run/wpa_supplicant p2p_group_remove "$go" >/dev/null 2>&1
+  printf '%s AP de configuracion detenido\n' "$(date +%H:%M:%S)" >>/run/appliance.log
+ fi
+ pid=$(cat /run/dnsmasq.pid 2>/dev/null)
+ [ -z "$pid" ] || kill "$pid" 2>/dev/null
+ rm -f /run/dnsmasq.pid /run/ap-interface
+ exit 0
+fi
+go=$(iw dev | awk '/Interface /{n=$2} /type P2P-GO/{print n;exit}')
+if [ -z "$go" ]; then
+ id=$(wpa_cli -i wlan0 -p /run/wpa_supplicant list_networks | awk -F '\t' '$4 ~ /P2P-PERSISTENT/{print $1;exit}')
+ [ -n "$id" ] || exit 1
+ freq=$(wpa_cli -i wlan0 -p /run/wpa_supplicant status | sed -n 's/^freq=//p')
+ case "$freq" in 24[0-9][0-9]) ;; *) freq=2437;; esac
+ wpa_cli -i wlan0 -p /run/wpa_supplicant p2p_group_add "persistent=$id" "freq=$freq" >/run/ap-create-result 2>&1
+ sleep 1
+ go=$(iw dev | awk '/Interface /{n=$2} /type P2P-GO/{print n;exit}')
+ [ -n "$go" ] || exit 1
+ printf '%s Red de configuracion activa\n' "$(date +%H:%M:%S)" >>/run/appliance.log
+fi
+if ! ip -4 addr show dev "$go" | grep -q '192.168.78.1/24'; then
+ ip addr add 192.168.78.1/24 dev "$go"
+ ip link set "$go" up
+fi
+old=$(cat /run/ap-interface 2>/dev/null)
+pid=$(cat /run/dnsmasq.pid 2>/dev/null)
+if [ "$go" != "$old" ] || [ -z "$pid" ] || ! kill -0 "$pid" 2>/dev/null; then
+ [ -z "$pid" ] || kill "$pid" 2>/dev/null
+ sed "s/^interface=.*/interface=$go/" /etc/j1/dnsmasq.conf >/run/dnsmasq-active.conf
+ dnsmasq --conf-file=/run/dnsmasq-active.conf
+ printf '%s\n' "$go" >/run/ap-interface
+fi

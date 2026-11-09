@@ -1,0 +1,6 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+pid=$(cat /run/ntpd.pid 2>/dev/null)
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then exit 0; fi
+busybox ntpd -n -p time.cloudflare.com -S /usr/local/sbin/j1-time-save >/run/ntpd.log 2>&1 </dev/null &
+echo $! >/run/ntpd.pid

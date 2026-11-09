@@ -1,0 +1,26 @@
+# Alpine Linux 3.24 (armv7) packages of the J1 Open VPN system.
+# Same set as the device it was developed on, without the compiler.
+alpine-baselayout
+alpine-keys
+alpine-release
+apk-tools
+bash
+busybox
+busybox-extras
+dash
+dash-binsh
+dnsmasq
+dropbear
+dropbear-convert
+iproute2
+iptables
+iptables-legacy
+iw
+libqrencode-tools
+musl-utils
+openresolv
+python3
+wireguard-go
+wireguard-tools-wg
+wireguard-tools-wg-quick
+wpa_supplicant

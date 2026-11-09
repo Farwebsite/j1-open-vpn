@@ -1,0 +1,6 @@
+#!/bin/busybox sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+year=$(date -u +%Y)
+[ "$year" -ge 2024 ] || exit 0
+hwclock -w -u 2>/dev/null || true
+printf '%s Reloj sincronizado\n' "$(date +%H:%M:%S)" >>/run/appliance.log

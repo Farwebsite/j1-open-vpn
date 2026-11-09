@@ -1,0 +1,23 @@
+#!/bin/busybox sh
+# Persistent kernel log: survives power loss (sec_debug keeps no kernel log on
+# this phone). Writes to the data partition and syncs every 2 s; keeps the
+# current and previous boot (kmsg.log / kmsg.prev.log), 2 MB max each.
+# Vendor debug spam (regulator, cpufreq, fuel gauge: ~600 KB/min) is dropped.
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+D=/root/j1-logs
+mkdir -p $D
+[ ! -f $D/kmsg.log ] || mv -f $D/kmsg.log $D/kmsg.prev.log
+# /proc/kmsg starts with every message since boot that nobody has read yet
+printf '=== arranque %s, kernel %s\n' "$(date '+%F %T')" "$(uname -r)" >$D/kmsg.log
+sync
+( while :; do sleep 2; sync; done ) &
+cat /proc/kmsg | awk -v f=$D/kmsg.log -v p=$D/kmsg.prev.log -v max=2097152 '
+ /dcdc_set_voltage|cpufreq_scx35|read channel \[|sec_bat_monitor_work|sec_bat_fullcharged_check|sec_hal_fg_get_property|sec_bat_get_|Battery Connected|active wake lock|pm_print|PKTLINK|gonna (un)?plug|RTC *|CPU1: |platform_cpu_kill|powerdown_cpus|sprdfgu|fgu_capacity|Finger |_store_cpu_num_min_limit|cpu freq o|set_config_number|set_interface_count|sec_bat_temperature/ { next }
+ {
+  print strftime("%T") " " $0 >> f; fflush(f)
+  n += length($0) + 10
+  if (n > max) {
+   close(f); system("mv -f " f " " p)
+   print "=== rotado " strftime("%F %T") > f; fflush(f); n = 0
+  }
+ }'

@@ -1,0 +1,43 @@
+#!/bin/busybox sh
+# udhcpc script for wlan0 and USB Ethernet (eth*/usb*). Ethernet is preferred
+# (metric 50 vs 100). Both links are usually on the same LAN, so the address is
+# added as /32 with an explicit subnet route carrying the same metric; this
+# 3.10 kernel has no noprefixroute.
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+case "$interface" in
+ wlan0) metric=100; name=Wi-Fi; summary=/run/wifi-summary ;;
+ eth*|usb*) metric=50; name=Cable; summary=/run/eth-summary ;;
+ *) exit 1 ;;
+esac
+dns_merge() {
+ cat /run/dns-eth* /run/dns-usb* /run/dns-wlan0 2>/dev/null | awk '!seen[$0]++' >/etc/resolv.conf.new
+ mv /etc/resolv.conf.new /etc/resolv.conf
+}
+action=$1
+case "$action" in
+ bound|renew)
+  eval "$(ipcalc -n -p "$ip" "${subnet:-255.255.255.0}")"
+  ip -4 addr flush dev "$interface" scope global
+  ip addr add "$ip/32" dev "$interface"
+  ip route replace "$NETWORK/$PREFIX" dev "$interface" src "$ip" metric $metric
+  set -- $router
+  [ -z "$1" ] || ip route replace default via "$1" dev "$interface" metric $metric
+  : >/run/dns-$interface
+  for server in $dns; do printf 'nameserver %s\n' "$server" >>/run/dns-$interface; done
+  dns_merge
+  /usr/local/sbin/j1-time-sync
+  printf '%s: %s%s\n' "$name" "$ip" "${static:+ (IP fija)}" >$summary
+  # the shared IP may have just moved between Wi-Fi and cable: tell the router
+  [ "$action" = renew ] || arping -U -c 1 -w 1 -I "$interface" "$ip" >/dev/null 2>&1
+  # new address: web.py moves the UPnP port mapping to it
+  [ "$action" = renew ] || : >/run/upnp-request
+  [ "$action" = renew ] || printf '%s %s obtuvo direccion IP %s\n' "$(date +%H:%M:%S)" "$name" "$ip" >>/run/appliance.log
+  ;;
+ deconfig)
+  ip -4 addr flush dev "$interface" scope global 2>/dev/null
+  ip -4 route flush dev "$interface" 2>/dev/null
+  rm -f /run/dns-$interface
+  dns_merge
+  printf '%s: buscando conexion\n' "$name" >$summary
+  ;;
+esac

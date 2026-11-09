@@ -1,0 +1,116 @@
+#!/bin/busybox sh
+# SPDX-License-Identifier: GPL-2.0
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+# Spanish time (CET/CEST) for logs and the screen clock; override in /etc/j1/tz
+export TZ="$(cat /etc/j1/tz 2>/dev/null || echo CET-1CEST,M3.5.0,M10.5.0/3)"
+umask 077
+for source in /usr/share/j1/defaults/*; do
+ name=${source##*/}
+ [ -e "/etc/j1/$name" ] || cp -a "$source" "/etc/j1/$name"
+done
+: >/run/appliance.log
+log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>/run/appliance.log; }
+log 'Linux iniciado'
+# First boot of a fresh install: per-device secrets, plus the Wi-Fi firmware
+# and MAC address of this phone (Samsung files, never shipped in the image).
+# Read-only mounts by partition name, so nothing of Android is modified.
+part() { for d in /sys/class/block/mmcblk0p*; do grep -qx "PARTNAME=$1" "$d/uevent" && { echo "/dev/${d##*/}"; return; }; done; }
+if [ ! -s /etc/j1/admin-password ]; then
+ tr -dc 'A-HJ-NP-Z2-9' </dev/urandom | head -c 12 >/etc/j1/admin-password
+ echo >>/etc/j1/admin-password
+ log 'Primer arranque: clave de configuracion generada'
+fi
+if ! grep -q 'psk=' /etc/j1/p2p.conf 2>/dev/null; then
+ cat >/etc/j1/p2p.conf <<EOF
+network={
+    ssid="DIRECT-J1-VPN-$(tr -dc 'A-F0-9' </dev/urandom | head -c 4)"
+    psk="$(cat /etc/j1/admin-password)"
+    proto=RSN
+    key_mgmt=WPA-PSK
+    pairwise=CCMP
+    auth_alg=OPEN
+    mode=3
+    disabled=2
+    frequency=2437
+}
+EOF
+fi
+if [ ! -s /system/etc/wifi/bcmdhd_sta.bin ] && [ -n "$(part system)" ]; then
+ mkdir -p /run/android-system /system/etc/wifi
+ if mount -t ext4 -o ro,noload "$(part system)" /run/android-system; then
+  cp /run/android-system/etc/wifi/bcmdhd_sta.bin /run/android-system/etc/wifi/bcmdhd_apsta.bin /run/android-system/etc/wifi/nvram_net.txt /system/etc/wifi/ && log 'Primer arranque: firmware Wi-Fi copiado de Android'
+  umount /run/android-system
+ fi
+fi
+if [ ! -s /etc/j1/mac.info ] && [ -n "$(part efs)" ]; then
+ mkdir -p /run/android-efs
+ if mount -t ext4 -o ro,noload "$(part efs)" /run/android-efs; then
+  cp /run/android-efs/wifi/.mac.info /etc/j1/mac.info && log 'Primer arranque: MAC Wi-Fi copiada de EFS'
+  umount /run/android-efs
+ fi
+fi
+/usr/local/sbin/j1-klog >/dev/null 2>&1 </dev/null &
+hostname galaxy-j1-linux
+ip link set lo up
+mkdir -p /dev/net /efs/wifi /run/wpa_supplicant /run/wireguard
+[ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
+if [ -f /etc/j1/random-seed ]; then cat /etc/j1/random-seed >/dev/urandom; fi
+head -c 512 /dev/urandom >/etc/j1/random-seed.new
+mv /etc/j1/random-seed.new /etc/j1/random-seed
+[ ! -f /etc/j1/mac.info ] || cp /etc/j1/mac.info /efs/wifi/.mac.info
+printf 'AP: %s\n' "$(sed -n 's/^[[:space:]]*ssid="\(.*\)"/\1/p' /etc/j1/p2p.conf)" >/run/ap-name
+printf 'Clave: %s\n' "$(cat /etc/j1/admin-password)" >/run/ap-password
+printf 'Wi-Fi: iniciando\n' >/run/wifi-summary
+printf 'WG: iniciando\n' >/run/vpn-summary
+# J1_UI_DEBUG: one line per tap/action in /run/display.log (taps only, cheap)
+(while :; do J1_UI_DEBUG=1 /usr/local/bin/j1-display; sleep 2; done) >>/run/display.log 2>&1 </dev/null &
+# web.py right away (it retries until the network addresses exist): the screen gets its content in ~2 s
+/usr/bin/python3 /usr/local/lib/j1/web.py >/run/web.log 2>&1 </dev/null &
+echo $! >/run/web.pid
+USB=/sys/class/android_usb/android0
+if [ -d "$USB" ]; then
+ echo 0 >"$USB/enable"
+ echo 04E8 >"$USB/idVendor"
+ echo 6863 >"$USB/idProduct"
+ echo Samsung >"$USB/iManufacturer"
+ echo J13G-Linux-USB >"$USB/iProduct"
+ echo J13GLINUXTEST >"$USB/iSerial"
+ [ ! -e "$USB/f_rndis/manufacturer" ] || echo Samsung >"$USB/f_rndis/manufacturer"
+ [ ! -e "$USB/f_rndis/vendorID" ] || echo 04E8 >"$USB/f_rndis/vendorID"
+ [ ! -e "$USB/f_rndis/wceis" ] || echo 1 >"$USB/f_rndis/wceis"
+ echo rndis >"$USB/functions"
+ echo 2 >"$USB/bDeviceClass"
+ echo 0 >"$USB/bDeviceSubClass"
+ echo 0 >"$USB/bDeviceProtocol"
+ echo 1 >"$USB/enable"
+fi
+n=0
+while [ ! -d /sys/class/net/rndis0 ] && [ "$n" -lt 20 ]; do sleep 1; n=$((n+1)); done
+if [ -d /sys/class/net/rndis0 ]; then
+ ip addr add 192.168.77.1/30 dev rndis0
+ ip link set rndis0 up
+ log 'Red USB lista: 192.168.77.1'
+fi
+/usr/sbin/dropbear -E -R -s -j -k -p 192.168.77.1:22 >/run/ssh.log 2>&1
+cat >/run/dnsmasq-usb.conf <<'EOF'
+interface=rndis0
+bind-interfaces
+port=0
+dhcp-range=192.168.77.2,192.168.77.2,255.255.255.252,1h
+dhcp-option=3
+dhcp-option=6
+pid-file=/run/dnsmasq-usb.pid
+dhcp-leasefile=/run/dnsmasq-usb.leases
+log-facility=/run/dnsmasq-usb.log
+EOF
+dnsmasq --conf-file=/run/dnsmasq-usb.conf
+[ ! -e /sys/module/dhd/parameters/firmware_path ] || echo /system/etc/wifi/bcmdhd_sta.bin >/sys/module/dhd/parameters/firmware_path
+[ ! -e /sys/module/dhd/parameters/nvram_path ] || echo /system/etc/wifi/nvram_net.txt >/sys/module/dhd/parameters/nvram_path
+ip link set wlan0 up
+wpa_supplicant -Dnl80211 -iwlan0 -c/etc/j1/wifi.conf -I/etc/j1/p2p.conf -e/etc/j1/hostapd.entropy -P/run/wpa_supplicant.pid >/run/wpa-client.log 2>&1 </dev/null &
+echo $! >/run/wpa_supplicant.pid
+/usr/local/sbin/j1-network >/run/network.log 2>&1 </dev/null &
+echo $! >/run/network.pid
+log 'Servicios de configuracion iniciados'
+trap 'log "Senal recibida"' TERM INT
+while :; do sleep 3600 & wait $!; done
