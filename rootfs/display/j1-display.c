@@ -162,7 +162,8 @@ static void icon(int x, int y, int n, uint32_t c) { icon_sz(x + 1, y + 1, n, 0, 
 static uint32_t icon_color(const char *name);
 
 /* ---- screen model ---- */
-struct el { char t, *a, *b, *c, *d; int y, h, dirty, col, pg; char val[160]; };
+/* a-d point into resp, which the next request overwrites: a field keeps its own name in key */
+struct el { char t, *a, *b, *c, *d; int y, h, dirty, col, pg; char key[64], val[160]; };
 /* field kinds p (password) and q (numeric code) are shown as asterisks */
 static int secret(const struct el *e) { return e->d && (*e->d == 'p' || *e->d == 'q'); }
 /* home tiles (C): two per row */
@@ -243,7 +244,7 @@ static void clamp_scroll(void) { int m = content_h - view_h(); if (scroll > m) s
 static void parse(int keep_dirty) {
 	static char kn[64][64], kv[64][160]; int nk = 0;
 	for (int i = 0; i < nel && nk < 64; i++) if (els[i].t == 'F' && els[i].dirty) {
-		snprintf(kn[nk], 64, "%s", els[i].a); snprintf(kv[nk], 160, "%s", els[i].val); nk++;
+		snprintf(kn[nk], 64, "%s", els[i].key); snprintf(kv[nk], 160, "%s", els[i].val); nk++;
 	}
 	char old[128]; snprintf(old, sizeof old, "%s", screen_id);
 	nel = 0; refresh_s = 0; back[0] = 0; title[0] = 0;
@@ -270,7 +271,7 @@ static void parse(int keep_dirty) {
 		else if (fld[0][0] && (fld[1] || fld[0][0] == 'G')) {
 			struct el *e = &els[nel++]; memset(e, 0, sizeof *e);
 			e->t = fld[0][0]; e->a = fld[1] ? fld[1] : (char *)""; e->b = fld[2]; e->c = fld[3]; e->d = fld[4];
-			if (e->t == 'F') snprintf(e->val, sizeof e->val, "%s", e->c ? e->c : "");
+			if (e->t == 'F') { snprintf(e->val, sizeof e->val, "%s", e->c ? e->c : ""); snprintf(e->key, sizeof e->key, "%s", e->a); }
 			if (e->t == 'D') snprintf(e->val, sizeof e->val, "%s", e->b ? e->b : "0");
 		}
 		if (!nl) break;
@@ -629,7 +630,7 @@ static int has_error(void) {
 static void send_action(const char *action, int refresh) {
 	static char q[16384]; q[0] = 0;
 	strcat(q, "a="); enc(q, sizeof q, action); strcat(q, "&s="); enc(q, sizeof q, screen_id);
-	if (!refresh) for (int i = 0; i < nel; i++) if (els[i].t == 'F') { strcat(q, "&f_"); enc(q, sizeof q, els[i].a); strcat(q, "="); enc(q, sizeof q, els[i].val); }
+	if (!refresh) for (int i = 0; i < nel; i++) if (els[i].t == 'F') { strcat(q, "&f_"); enc(q, sizeof q, els[i].key); strcat(q, "="); enc(q, sizeof q, els[i].val); }
 	double t0 = now();
 	char act[48]; snprintf(act, sizeof act, "%s", action);  /* action may point into resp */
 	busy_pending = !refresh;
