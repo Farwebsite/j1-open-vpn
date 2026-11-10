@@ -298,9 +298,21 @@ static int view_h(void) { return (kb_open ? KBY - PVH : SH) - TOP; }
 
 struct key { int x, y, w, h; int code; const char *label; };
 enum { K_SHIFT = 256, K_BS, K_LAYER, K_LAYER2, K_OK, K_SPACE, K_CANCEL, K_SHOW };
+/* code fields (kind q): only digits, a phone-style 3 x 4 pad */
+static int digits_only(void) { return kb_el && kb_el->d && *kb_el->d == 'q'; }
 static int keys(struct key *k) {
 	int n = 0, y = KBY;
 	static char lab[3][10][2];
+	if (digits_only()) {
+		static const char *pad[12] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "\x1b", "0", "OK"};
+		for (int i = 0; i < 12; i++) {
+			int c = i == 9 ? K_BS : i == 11 ? K_OK : pad[i][0], x = i % 3 * (SW / 3);
+			k[n++] = (struct key){x, KBY + i / 3 * KH, i % 3 == 2 ? SW - x : SW / 3, KH, c, pad[i]};
+		}
+		k[n++] = (struct key){SW - 64, KBY - PVH, 64, PVH, K_CANCEL, "X"};
+		k[n++] = (struct key){SW - 136, KBY - PVH, 72, PVH, K_SHOW, kb_show ? "ocul" : "ver"};
+		return n;
+	}
 	for (int r = 0; r < 3; r++, y += KH) {
 		const char *row = KB[kb_layer][r]; int len = (int)strlen(row), x = r < 2 ? 0 : 72;
 		if (r == 2) k[n++] = (struct key){0, y, 72, KH, kb_layer == 0 ? K_SHIFT : K_LAYER2, kb_layer == 0 ? "\x18" : kb_layer == 1 ? "#+=" : "123"};
@@ -743,7 +755,7 @@ static void kb_press(int i) {
 	else if (c == K_SHIFT) kb_shift = !kb_shift;
 	else if (c == K_LAYER) { kb_layer = kb_layer ? 0 : 1; kb_shift = 0; }
 	else if (c == K_LAYER2) kb_layer = kb_layer == 1 ? 2 : 1;
-	else if (len < (int)sizeof kb_buf - 1) {
+	else if (len < (digits_only() ? 8 : (int)sizeof kb_buf - 1)) {   /* a code has at most 8 digits */
 		kb_buf[len] = (char)(c == K_SPACE ? ' ' : c); kb_buf[len + 1] = 0;
 		if (kb_layer == 0) kb_shift = 0;
 	}
