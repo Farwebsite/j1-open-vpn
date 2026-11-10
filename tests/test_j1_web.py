@@ -211,7 +211,7 @@ class Tests(unittest.TestCase):
   out=app.ui_request(b'a=disp.lock%3A0&s=disp');self.assertIn(b'\nK\t0\t0\t0\n',out);self.assertFalse(app.display_lock())
   self.assertIn(b'\te\n',app.ui_request(b'a=disp.lock%3A7&s=disp'));self.assertFalse(app.display_lock())
   app.display_save(timeout=15);self.assertFalse(app.display_lock());self.assertEqual(app.display_timeout(),15)
-  self.assertIn('value=1><button>Activar',app.lock_section())
+  self.assertIn('value=1><button class=sec>Activar',app.lock_section())
   app.display_save(lock=True);self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=nav%3Ahome&s=home'))
 
  def test_resources_screen_measures_between_visits(self):

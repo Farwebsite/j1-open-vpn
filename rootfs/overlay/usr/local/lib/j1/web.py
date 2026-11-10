@@ -8,7 +8,69 @@ RUN = Path(os.environ.get('J1_RUN', '/run'))
 LOCK = threading.RLock()
 CSRF = secrets.token_hex(32)
 RUNTIME = {'vpn': 'Iniciando', 'ddns': 'Sin configurar', 'ddns6': 'Desactivado', 'upnp': 'Comprobando...', 'scan': 'Pulsa Buscar redes', 'networks': []}
-CSS = '''body{font:16px system-ui;background:#0b1420;color:#edf4fa;max-width:880px;margin:24px auto;padding:16px}nav{display:flex;gap:20px;flex-wrap:wrap}a{color:#9aefc1}section{background:#142133;border:1px solid #304158;border-radius:12px;padding:22px;margin:20px 0}label{display:block;margin:14px 0 5px}input,select,button{box-sizing:border-box;max-width:100%;padding:11px;border-radius:7px;border:1px solid #637387;font:inherit}input:not([type=checkbox]),select{width:100%}button{background:#9aefc1;color:#10251c;margin-top:16px;cursor:pointer}.danger{background:#f4b4b4}small,.muted{color:#b7c7d8}p{line-height:1.5}table{width:100%;border-collapse:collapse}td,th{text-align:left;border-bottom:1px solid #40516a;padding:10px 5px}.notice{padding:12px;background:#263e3c}code{overflow-wrap:anywhere}h1,h2{line-height:1.2}'''
+CSS = '''
+:root{--card:#1c1c1e;--field:#2c2c2e;--line:#38383a;--txt:#ebebf5;--mut:#8e8e93;--acc:#0a84ff;--grn:#30d158;--red:#ff453a;--yel:#ffd60a;color-scheme:dark}
+*{box-sizing:border-box}html{background:#000}
+body{margin:0 auto;max-width:640px;padding:0 14px 32px;background:#000;color:var(--txt);font:16px/1.45 Inter,-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-text-size-adjust:100%}
+header{position:sticky;top:0;z-index:2;background:rgba(0,0,0,.92);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px);padding:14px 0 10px}
+h1{font-size:22px;font-weight:650;margin:0 0 10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.chip{display:inline-flex;align-items:center;gap:7px;background:var(--card);border-radius:99px;padding:5px 12px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--grn)}.dot.y{background:var(--yel)}
+nav{display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}nav::-webkit-scrollbar{display:none}
+nav a{flex:none;display:inline-flex;align-items:center;gap:7px;padding:8px 12px;border-radius:12px;background:var(--card);color:var(--txt);text-decoration:none;font-size:14px}
+nav .ic{width:18px;height:18px}
+.ic{width:22px;height:22px;fill:currentColor;flex:none}
+section{background:var(--card);border-radius:20px;padding:18px 18px 20px;margin:14px 0;scroll-margin-top:140px}
+h2{display:flex;align-items:center;gap:12px;font-size:19px;font-weight:650;margin:0 0 12px}
+.tile{width:36px;height:36px;border-radius:10px;background:var(--field);display:grid;place-items:center;flex:none}
+h3{font-size:16px;margin:22px 0 4px}
+p{margin:8px 0}a{color:var(--acc)}
+label{display:block;margin:14px 0 6px;font-size:14px;color:var(--mut)}
+input,select,textarea{width:100%;font:inherit;color:var(--txt);background:var(--field);border:1px solid transparent;border-radius:12px;padding:12px 14px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--acc)}input::placeholder,textarea::placeholder{color:#636366}
+label:has(input[type=checkbox]){display:flex;align-items:center;justify-content:space-between;flex-direction:row-reverse;gap:12px;color:var(--txt);font-size:16px;margin:16px 0}
+input[type=checkbox]{appearance:none;-webkit-appearance:none;position:relative;width:51px;height:31px;padding:0;border:0;border-radius:99px;background:#39393d;flex:none;cursor:pointer;transition:background .2s}
+input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:left .2s}
+input[type=checkbox]:checked{background:var(--grn)}input[type=checkbox]:checked::after{left:22px}
+button{display:block;width:100%;margin-top:16px;padding:13px;border:0;border-radius:12px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:active{opacity:.75}.danger{background:#3a1616;color:var(--red)}.sec{background:var(--field);color:var(--txt)}
+small,.muted{color:var(--mut);font-size:13px}form small{display:block;margin-top:8px}
+.notice{border-radius:14px;padding:12px 14px;margin:14px 0 0;background:#10301c;color:var(--grn)}.notice.err,p.err{color:var(--red)}.notice.err{background:#3a1616}
+details{margin:12px 0}summary{cursor:pointer;color:var(--acc)}
+code{background:var(--field);padding:2px 6px;border-radius:6px;font-size:14px;overflow-wrap:anywhere}
+.list{list-style:none;padding:0;margin:6px 0}.list li{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}.list li:first-child{border-top:0}
+.list .who{flex:1;min-width:0;overflow-wrap:anywhere}.list .who small{display:block}.list form{margin:0}
+.btn2{display:inline-flex;align-items:center;gap:6px;padding:9px 12px;border-radius:12px;background:var(--field);color:var(--txt);text-decoration:none;font-weight:600;font-size:14px}.btn2 .ic{width:18px;height:18px}
+.list button{width:auto;margin:0;padding:9px 12px;font-size:14px}
+footer{color:var(--mut);font-size:13px;text-align:center;margin:26px 6px 0}footer a{color:var(--mut)}footer p{margin:6px 0}
+'''.replace('\n','')
+# ---- icons: generated by rootfs/display/gen-font.py from Material Icons (Apache 2.0)
+ICONS_SVG={
+    'wifi':'M107 235Q169 296 256.5 296Q344 296 405 235L363 192Q345 210 313.5 223Q282 236 256 236Q230 236 198.5 223Q167 210 149 192ZM192 149Q219 176 256 176Q293 176 320 149L256 85ZM21 320Q119 417 256.5 417Q394 417 491 320L448 277Q368 356 256 356Q144 356 64 277Z',
+    'cable':'M379 395 495 256 379 117 346 144 439 256 346 368ZM235 235V277H277V235ZM363 277V235H320V277ZM149 235V277H192V235ZM166 368 73 256 166 144 133 117 17 256 133 395Z',
+    'vpn':'M213 149 384 320 354 350 213 210 158 265 128 235ZM256 491 448 405V277Q448 188 393 114.5Q338 41 256 21Q174 41 119 114.5Q64 188 64 277V405Z',
+    'dns':'M413 298Q454 295 483 264.5Q512 234 512 192Q512 148 480.5 116.5Q449 85 405 85H128Q75 85 37.5 122.5Q0 160 0 213Q0 260 33.5 297.5Q67 335 114 340Q135 379 173 403Q211 427 256 427Q310 427 356.5 389Q403 351 413 298Z',
+    'key':'M448 299H270Q261 324 243.5 343Q226 362 201.5 373Q177 384 149 384Q114 384 85 366.5Q56 349 38.5 320Q21 291 21 256Q21 221 38.5 192Q56 163 85 145.5Q114 128 149 128Q177 128 201.5 139Q226 150 243.5 169Q261 188 270 213H277L320 171L363 213L405 171L491 257ZM149 192Q132 192 117.5 200.5Q103 209 94 223.5Q85 238 85 256Q85 274 94 288.5Q103 303 117.5 311.5Q132 320 149 320Q167 320 181.5 311.5Q196 303 204.5 288.5Q213 274 213 256Q213 238 204.5 223.5Q196 209 181.5 200.5Q167 192 149 192Z',
+    'ap':'M469 235Q469 177 440.5 127.5Q412 78 363 50L341 87Q380 110 403.5 149.5Q427 189 427 235Q427 305 377 355Q327 405 256 405Q185 405 135 355Q85 305 85 235Q85 188 108 149Q131 110 170 87L149 50Q100 78 71.5 127.5Q43 177 43 235Q43 324 105.5 386Q168 448 256 448Q344 448 406.5 386Q469 324 469 235ZM384 235Q384 200 366.5 170.5Q349 141 320 124L299 161Q341 186 341 235Q341 270 316 295Q291 320 256 320Q221 320 196 295Q171 270 171 235Q171 186 213 161L192 124Q163 141 145.5 170.5Q128 200 128 235Q128 288 165.5 325.5Q203 363 256 363Q309 363 346.5 325.5Q384 288 384 235ZM226 264.5Q239 277 256 277Q273 277 286 264.5Q299 252 299 235Q299 218 286 205Q273 192 256 192Q239 192 226 205Q213 218 213 235Q213 252 226 264.5Z',
+    'lock':'M322 341V384Q322 411 302.5 430.5Q283 450 256 450Q229 450 209.5 430.5Q190 411 190 384V341ZM226 162Q239 149 256 149Q273 149 286 162Q299 175 299 192Q299 209 286 222Q273 235 256 235Q239 235 226 222Q213 209 213 192Q213 175 226 162ZM384 341Q401 341 414 328.5Q427 316 427 299V85Q427 68 414 55.5Q401 43 384 43H128Q111 43 98 55.5Q85 68 85 85V299Q85 316 98 328.5Q111 341 128 341H149V384Q149 428 180.5 459.5Q212 491 256 491Q300 491 331.5 459.5Q363 428 363 384V341Z',
+    'tz':'M267 363V251L363 194L347 167L235 235V363ZM135.5 135.5Q186 85 256 85Q326 85 376.5 135.5Q427 186 427 256Q427 326 376.5 376.5Q326 427 256 427Q186 427 135.5 376.5Q85 326 85 256Q85 186 135.5 135.5ZM105.5 406.5Q168 469 256 469Q344 469 406.5 406.5Q469 344 469 256Q469 168 406.5 105.5Q344 43 256 43Q168 43 105.5 105.5Q43 168 43 256Q43 344 105.5 406.5Z',
+    'ssh':'M427 427H85Q68 427 55.5 414.5Q43 402 43 384V128Q43 110 55.5 97.5Q68 85 85 85H427Q444 85 456.5 97.5Q469 110 469 128V384Q469 402 456.5 414.5Q444 427 427 427ZM427 128H85V341H427ZM384 149H256V192H384ZM160 149 130 179 185 235 130 290 160 320 245 235Z',
+    'download':'M107 85H405V128H107ZM405 320H320V448H192V320H107L256 171Z',
+    'user':'M427 128V85H85V128Q85 166 143.5 189.5Q202 213 256 213Q310 213 368.5 189.5Q427 166 427 128ZM316 281Q291 256 256 256Q221 256 196 281Q171 306 171 341Q171 376 196 401.5Q221 427 256 427Q291 427 316 401.5Q341 376 341 341Q341 306 316 281Z',
+}
+# ---- end of icons
+# each section: icon and color of its tile on the screen
+SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('usb','Cable','cable','#bf5af2'),('vpn','WireGuard','vpn','#ff9f0a'),
+          ('dns','Cloudflare','dns','#0a84ff'),('clave','Contraseña','key','#5ac8fa'),('red','Red J1','ap','#64d2ff'),
+          ('pantalla','Bloqueo','lock','#98989d'),('hora','Hora','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'))
+def icon(name,color=''):
+    return ('<svg class=ic viewBox="0 -512 512 512" aria-hidden=true'+(' style="color:'+color+'"' if color else '')+
+            '><path transform="scale(1 -1)" d="'+ICONS_SVG[name]+'"/></svg>')
+def with_icons(body):
+    # '<section id=x><h2>' gets the tile of section x
+    for sid,_,ic,color in SECTIONS:body=body.replace('<section id='+sid+'><h2>','<section id='+sid+'><h2><span class=tile>'+icon(ic,color)+'</span>',1)
+    return body
 def esc(s): return html.escape(str(s), quote=True)
 def log(s):
     with (RUN/'appliance.log').open('a') as f: f.write(time.strftime('%H:%M:%S ') + s + '\n')
@@ -424,7 +486,7 @@ def lock_section():
         '<form method=post>'+hidden()+'<input type=hidden name=action value=lockpin>'+'<label>Contraseña actual del panel<input type=password name=current autocomplete=current-password></label>'+
         '<label>'+('Código nuevo' if pin else 'Código de desbloqueo')+' (4 a 8 cifras)<input type=password name=pin inputmode=numeric pattern="[0-9]{4,8}" maxlength=8 autocomplete=off></label><label>Repítelo<input type=password name=pin2 inputmode=numeric maxlength=8 autocomplete=off></label>'
         '<button>'+('Cambiar' if pin else 'Poner')+' código</button><small>Activa también la pantalla de bloqueo. Mejor 6 cifras o más.</small></form>'+'<p class=muted>Activada: cuando la pantalla del J1 se apaga, tocarla solo enciende el reloj y hay que deslizar para usarla, así no se pulsa nada sin querer.</p><form method=post>'+hidden()+
-        '<input type=hidden name=action value=lock><input type=hidden name=on value='+('0' if on else '1')+'><button>'+('Desactivar' if on else 'Activar')+' pantalla de bloqueo</button></form></section>')
+        '<input type=hidden name=action value=lock><input type=hidden name=on value='+('0' if on else '1')+'><button class=sec>'+('Desactivar' if on else 'Activar')+' pantalla de bloqueo</button></form></section>')
 def tz_section():
     cur=tz_get()
     opts=''.join('<option value=%d%s>%s</option>'%(i,' selected' if z==cur else '',esc(n)) for i,(n,z) in enumerate(TZ_ZONES))
@@ -452,22 +514,27 @@ def ssh_section():
         +('<form method=post>'+hidden()+'<input type=hidden name=action value=sshoff><button class=danger>Desactivar SSH (borrar todas las claves)</button></form>' if n else '')+'</section>')
 
 def hidden():return '<input type="hidden" name="csrf" value="'+CSRF+'">'
-def page(message=''):
+def page(message='',error=False):
     v=ensure_vpn_state();cf=load('cloudflare.json',{})
     try:wifi=(RUN/'wifi-summary').read_text().strip()
     except FileNotFoundError:wifi='Sin configurar'
-    out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>J1 VPN</title><style>'+CSS+'</style><h1>J1 · Servidor VPN</h1><nav><a href="#wifi">Wi-Fi</a><a href="#usb">Cable</a><a href="#vpn">WireGuard</a><a href="#dns">Cloudflare</a><a href="#pantalla">Pantalla</a><a href="#hora">Hora</a><a href="#ssh">SSH</a></nav>']
-    if message:out.append('<p class=notice role=status>'+esc(message)+'</p>')
-    out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
+    vpn_ok=RUNTIME['vpn'].startswith('Activo');wifi_ok=bool(re.search(r'\d+\.\d+\.\d+\.\d+',wifi))
+    out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=theme-color content="#000000"><title>J1 VPN</title><style>'+CSS+'</style>'
+         '<header><h1>J1 · Servidor VPN</h1><div class=chips><span class=chip><span class="dot'+('' if vpn_ok else ' y')+'"></span>'+esc(RUNTIME['vpn'])+'</span>'
+         '<span class=chip><span class="dot'+('' if wifi_ok else ' y')+'"></span>'+esc(wifi)+'</span></div><nav>'+
+         ''.join('<a href="#'+sid+'">'+icon(ic,color)+esc(name)+'</a>' for sid,name,ic,color in SECTIONS)+'</nav>'+
+         ('<p class="notice'+(' err' if error else '')+'" role=status>'+esc(message)+'</p>' if message else '')+'</header>']
+    out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button class=sec>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
     out+=['</select><details><summary>Red oculta o nombre manual</summary><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off></label></details><label>Contraseña Wi-Fi<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Guardar y conectar</button></form><p><small>La red de configuración se mantiene disponible.</small></p></section>',usb_section()]
-    out+=['<section id=vpn><h2>WireGuard</h2><p>'+esc(RUNTIME['vpn'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=vpn><label>Puerto UDP<input type=number name=port min=1 max=65535 required value="'+str(v['port'])+'"></label><label>Dominio o IP de conexión<input name=endpoint value="'+esc(v.get('endpoint',''))+'" placeholder="vpn2.tudominio.com"></label><small>Vacío: usa el dominio de Cloudflare o la IP de acceso actual. Web en TCP 80; VPN en UDP. Si cambias el puerto o dominio, descarga otra vez los perfiles.</small><br><button>Guardar puerto y dirección</button></form><h3>Clientes</h3><table><tr><th>Nombre</th><th>Dirección</th><th>Acciones</th></tr>']
+    out+=['<section id=vpn><h2>WireGuard</h2><p>'+esc(RUNTIME['vpn'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=vpn><label>Puerto UDP<input type=number name=port min=1 max=65535 required value="'+str(v['port'])+'"></label><label>Dominio o IP de conexión<input name=endpoint value="'+esc(v.get('endpoint',''))+'" placeholder="vpn2.tudominio.com"></label><small>Vacío: usa el dominio de Cloudflare o la IP de acceso actual. Web en TCP 80; VPN en UDP. Si cambias el puerto o dominio, descarga otra vez los perfiles.</small><br><button>Guardar puerto y dirección</button></form><h3>Clientes</h3><ul class=list>'+('' if v['clients'] else '<li><small>Ninguno todavía.</small></li>')]
     for c in v['clients']:
-        out.append('<tr><td>'+esc(c['name'])+'</td><td>10.66.0.'+str(c['ip'])+'</td><td><a href="/client/'+c['id']+'.conf">Descargar .conf</a><form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar cliente</button></form></td></tr>')
-    out+=['</table><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor.</small></p></section>']
+        out.append('<li><span class=tile>'+icon('user','#0a84ff')+'</span><span class=who><b>'+esc(c['name'])+'</b><small>10.66.0.'+str(c['ip'])+'</small></span>'
+                   '<a class=btn2 href="/client/'+c['id']+'.conf">'+icon('download')+'.conf</a><form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar</button></form></li>')
+    out+=['</ul><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor.</small></p></section>']
     checked=' checked' if cf.get('enabled') else ''
-    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'<footer><small>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</small><p><small>'+BRAND+' · <a href="https://'+REPO+'">'+REPO+'</a></small></footer></html>']
-    return ''.join(out).encode()
+    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'<footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p><p>'+BRAND+' · <a href="https://'+REPO+'">'+REPO+'</a></p></footer></html>']
+    return with_icons(''.join(out)).encode()
 
 # ---- web panel: on/off and who may reach it (set from the screen) ----
 # Decided by who connects, not by the address used: a VPN client sends
@@ -614,7 +681,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with LOCK:body=page(message)
             self.respond(body)
         except (ValueError,RuntimeError,subprocess.SubprocessError) as e:
-            with LOCK:body=page(str(e) if isinstance(e,(ValueError,RuntimeError)) else 'No se pudo completar la operación')
+            with LOCK:body=page(str(e) if isinstance(e,(ValueError,RuntimeError)) else 'No se pudo completar la operación',True)
             self.respond(body,400)
 
 # ---- Touch screen (j1-display) over /run/j1-ui.sock ----
