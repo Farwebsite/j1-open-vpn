@@ -33,7 +33,7 @@ Con la pantalla apagada se borra la memoria de vídeo: un código QR no se queda
 
 Desde un dispositivo conectado a la red de configuración: **http://192.168.78.1**. Por USB desde el PC: **http://192.168.77.1** (el J1 da la IP al PC solo). Usuario `admin`. Contraseña: la clave de la red de configuración, salvo que le pongas una **propia** (pantalla *Panel web* → *Cambiar contraseña del panel*, o en el propio panel, sección *Contraseña del panel*, que pide la actual). La propia se guarda como hash (PBKDF2 con sal). Si la olvidas, cámbiala desde la pantalla del J1 o pulsa *Volver a usar la clave de la red*.
 
-Permite lo mismo que la pantalla y además **descargar el archivo `.conf`** de cada cliente para ordenadores.
+Permite lo mismo que la pantalla y además **descargar el archivo `.conf`** de cada cliente para ordenadores. Desde el panel se pueden cambiar **todas las claves**: la del propio panel, la de la red de configuración, el código de la pantalla de bloqueo, la de la Wi-Fi de casa y el token de Cloudflare. Las tres primeras piden la contraseña actual del panel. Al cambiar la clave de la red de configuración se desconectan los equipos conectados a ella (y, si el panel no tiene contraseña propia, el navegador pedirá la nueva).
 
 En la pantalla, **Panel web** (baldosa de la segunda página del inicio):
 

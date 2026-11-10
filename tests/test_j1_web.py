@@ -161,6 +161,9 @@ class Tests(unittest.TestCase):
   app.ui_request(b'a=panel.vpn%3A1&s=panel');self.assertIsNotNone(app.panel_own_password())   # other settings keep it
   self.assertIn('Propia',app.pw_section())
   app.ui_request(b'a=panel.pwreset&s=panel');self.assertTrue(app.panel_password_ok('ApKey12345'));self.assertIsNone(app.panel_own_password())
+ def test_panel_forms_for_codes(self):
+  self.assertIn('action value=lockpin>',app.lock_section());self.assertIn('action value=appass>',app.ap_section())
+  self.assertIn('name=current',app.ap_section());self.assertIn('Poner c',app.lock_section())
  def test_lock_code(self):
   app.PIN_FAIL.update(n=0,until=0.0)
   self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=nav%3Adisp'))

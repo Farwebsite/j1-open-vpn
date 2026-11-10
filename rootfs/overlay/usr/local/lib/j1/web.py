@@ -420,7 +420,10 @@ def lock_section():
     on=display_lock();pin=on and display_pin() is not None
     return ('<section id=pantalla><h2>Pantalla de bloqueo</h2><p>'+('Activada' if on else 'Desactivada')+(' · con código' if pin else '')+'</p>'+
         ('<p class=err>Bloqueada tras %d códigos erróneos: la pantalla no acepta ningún código.</p><form method=post>'%PIN_FAIL['n']+hidden()+'<input type=hidden name=action value=lockunblock><button>Desbloquear la pantalla</button></form>' if pin and pin_blocked() else '')+
-        ('<form method=post>'+hidden()+'<input type=hidden name=action value=lockpinoff><button class=danger>Quitar el código de desbloqueo</button><small>Por si se ha olvidado; se vuelve a poner desde la pantalla (Pantalla de bloqueo).</small></form>' if pin else '')+'<p class=muted>Activada: cuando la pantalla del J1 se apaga, tocarla solo enciende el reloj y hay que deslizar para usarla, así no se pulsa nada sin querer.</p><form method=post>'+hidden()+
+        ('<form method=post>'+hidden()+'<input type=hidden name=action value=lockpinoff><button class=danger>Quitar el código de desbloqueo</button><small>Por si se ha olvidado.</small></form>' if pin else '')+
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=lockpin>'+'<label>Contraseña actual del panel<input type=password name=current autocomplete=current-password></label>'+
+        '<label>'+('Código nuevo' if pin else 'Código de desbloqueo')+' (4 a 8 cifras)<input type=password name=pin inputmode=numeric pattern="[0-9]{4,8}" maxlength=8 autocomplete=off></label><label>Repítelo<input type=password name=pin2 inputmode=numeric maxlength=8 autocomplete=off></label>'
+        '<button>'+('Cambiar' if pin else 'Poner')+' código</button><small>Activa también la pantalla de bloqueo. Mejor 6 cifras o más.</small></form>'+'<p class=muted>Activada: cuando la pantalla del J1 se apaga, tocarla solo enciende el reloj y hay que deslizar para usarla, así no se pulsa nada sin querer.</p><form method=post>'+hidden()+
         '<input type=hidden name=action value=lock><input type=hidden name=on value='+('0' if on else '1')+'><button>'+('Desactivar' if on else 'Activar')+' pantalla de bloqueo</button></form></section>')
 def tz_section():
     cur=tz_get()
@@ -432,10 +435,18 @@ def pw_section():
         '<input type=hidden name=action value=panelpw><label>Contraseña actual<input type=password name=current autocomplete=current-password></label>'
         '<label>Nueva (8 a 64 caracteres)<input type=password name=pw autocomplete=new-password minlength=8 maxlength=64></label><label>Repítela<input type=password name=pw2 autocomplete=new-password></label>'
         '<button>Cambiar contraseña</button><small>Después el navegador volverá a pedirla. Si la olvidas, cámbiala desde la pantalla del J1 (Panel web).</small></form></section>')
+def ap_section():
+    own=panel_own_password() is not None
+    return ('<section id=red><h2>Clave de la red de configuración</h2><p class=muted>La red <b>'+esc(readrun('ap-name','AP').replace('AP: ',''))+'</b>. '+
+        ('El panel tiene contraseña propia: no cambia.' if own else 'Es también la contraseña de este panel: después el navegador te pedirá la nueva.')+
+        ' Los equipos conectados a esa red se desconectarán y tendrán que volver a conectarse con la clave nueva.</p><form method=post>'+hidden()+
+        '<input type=hidden name=action value=appass>'+'<label>Contraseña actual del panel<input type=password name=current autocomplete=current-password></label>'+
+        '<label>Clave nueva (8 a 63 caracteres)<input type=password name=pw minlength=8 maxlength=63 autocomplete=new-password></label><label>Repítela<input type=password name=pw2 maxlength=63 autocomplete=new-password></label>'
+        '<button>Cambiar clave de la red</button></form></section>')
 def ssh_section():
     n=len(ssh_keys())
     state='Activo: %d clave%s autorizada%s.'%(n,'' if n==1 else 's','' if n==1 else 's') if n else 'Desactivado (ninguna clave autorizada).'
-    return pw_section()+lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
+    return pw_section()+ap_section()+lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshgen><button>Generar una clave y descargarla</button><small>Guarda el archivo descargado: es la llave para entrar y no se puede volver a descargar.</small></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshadd><label>O pega tu clave pública (id_ed25519.pub)<textarea name=key rows=3 maxlength=1000></textarea></label><button>Añadir clave pública</button></form>'
         +('<form method=post>'+hidden()+'<input type=hidden name=action value=sshoff><button class=danger>Desactivar SSH (borrar todas las claves)</button></form>' if n else '')+'</section>')
@@ -578,6 +589,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif action=='panelpw':
                 if not panel_password_ok(f.get('current','')):raise ValueError('La contraseña actual no es correcta')
                 panel_password_set(f.get('pw',''),f.get('pw2',''));message='Contraseña del panel cambiada: el navegador te la volverá a pedir.'
+            elif action=='lockpin':
+                if not panel_password_ok(f.get('current','')):raise ValueError('La contraseña actual no es correcta')
+                pin_set(f.get('pin',''),f.get('pin2',''));message='Código de desbloqueo puesto: se pedirá al desbloquear la pantalla.'
+            elif action=='appass':
+                if not panel_password_ok(f.get('current','')):raise ValueError('La contraseña actual no es correcta')
+                if f.get('pw','')!=f.get('pw2',''):raise ValueError('Las dos claves no coinciden')
+                ap_password(f.get('pw',''))
+                message='Clave de la red de configuración cambiada.'+('' if panel_own_password() else ' Es también la del panel: el navegador te la pedirá.')
             elif action=='lockunblock':pin_unblock();message='Pantalla desbloqueada: vuelve a aceptar el código.'
             elif action=='lockpinoff':pin_clear();message='Código de desbloqueo quitado.'
             elif action=='lock':display_save(lock=f.get('on')=='1');message='Pantalla de bloqueo '+('activada.' if display_lock() else 'desactivada.')
