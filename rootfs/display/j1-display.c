@@ -53,21 +53,26 @@ static void fill(int x, int y, int w, int h, uint32_t c) {
 	if (y < clip0) { h -= clip0 - y; y = clip0; }
 	if (x + w > SW) w = SW - x;
 	if (y + h > clip1) h = clip1 - y;
-	for (int j = 0; j < h; j++) { uint32_t *p = buf + (size_t)(y + j) * stride + x; for (int i = 0; i < w; i++) p[i] = c; }
+	if (w <= 0) return;
+	for (int j = 0; j < h; j++) {
+		uint32_t *p = buf + (size_t)(y + j) * stride + x;
+		if (!c) memset(p, 0, (size_t)w * 4); else for (int i = 0; i < w; i++) p[i] = c;   /* black background: memset */
+	}
 }
 static void put(int x, int y, uint32_t c) {
 	if (x >= 0 && x < SW && y >= clip0 && y < clip1) buf[(size_t)y * stride + x] = c;
 }
 /* mix two colors, a = 0..256 parts of c1 (antialiased corners) */
+/* R and B (bytes 0 and 2) blended together, then G: 2 multiplies per color pair */
 static uint32_t mix(uint32_t c1, uint32_t c2, int a) {
-	uint32_t o = 0;
-	for (int k = 0; k < 3; k++) {
-		int off = k == 0 ? R_OFF : k == 1 ? G_OFF : B_OFF;
-		int x1 = (c1 >> off) & 255, x2 = (c2 >> off) & 255;
-		o |= (uint32_t)((x1 * a + x2 * (256 - a)) >> 8) << off;
-	}
-	return o | (c1 & ~((255u << R_OFF) | (255u << G_OFF) | (255u << B_OFF)));
+	uint32_t b = 256 - a;
+	uint32_t rb = (((c1 & 0xff00ffu) * a + (c2 & 0xff00ffu) * b) >> 8) & 0xff00ffu;
+	uint32_t g = (((c1 & 0xff00u) * a + (c2 & 0xff00u) * b) >> 8) & 0xff00u;
+	return rb | g | (c1 & 0xff000000u);
 }
+#if R_OFF + G_OFF + B_OFF != 24 || G_OFF != 8
+#error mix() expects R, G, B in the three low bytes
+#endif
 /* rounded rectangle; the curved edge pixel is blended with what is under it */
 static void rrect(int x, int y, int w, int h, int r, uint32_t c) {
 	if (r * 2 > h) r = h / 2;
@@ -85,14 +90,14 @@ static void rrect(int x, int y, int w, int h, int r, uint32_t c) {
 	}
 }
 /* ---- text and icons: antialiased masks from j1-ui-font.h (gen-font.py) ---- */
-/* c over the pixel with coverage a 0-255 */
-static void blend(int x, int y, uint32_t c, int a) {
-	if (!a || x < 0 || x >= SW || y < clip0 || y >= clip1) return;
-	uint32_t *p = buf + (size_t)y * stride + x;
-	*p = a == 255 ? c : mix(c, *p, a + (a >> 7));
-}
+/* c over the pixels with coverage 0-255; clipped once per glyph, not per pixel */
 static void mask(int x, int y, int w, int h, const uint8_t *a, uint32_t c) {
-	for (int j = 0; j < h; j++, a += w) if (y + j >= clip0 && y + j < clip1) for (int i = 0; i < w; i++) blend(x + i, y + j, c, a[i]);
+	int i0 = x < 0 ? -x : 0, i1 = x + w > SW ? SW - x : w;
+	int j0 = y < clip0 ? clip0 - y : 0, j1 = y + h > clip1 ? clip1 - y : h;
+	for (int j = j0; j < j1; j++) {
+		const uint8_t *r = a + (size_t)j * w; uint32_t *p = buf + (size_t)(y + j) * stride + x;
+		for (int i = i0; i < i1; i++) { int v = r[i]; if (v) p[i] = v == 255 ? c : mix(c, p[i], v + (v >> 7)); }
+	}
 }
 static int fwidth(const struct font *f, const char *s, int n) {
 	int w = 0; for (int i = 0; i < n && s[i]; i++) w += f->g[(unsigned char)s[i]].adv; return w;
@@ -254,7 +259,7 @@ static void parse(int keep_dirty) {
 	if (!same) scroll = 0;
 	if (same && keep_dirty)
 		for (int i = 0; i < nel; i++) if (els[i].t == 'F')
-			for (int k = 0; k < nk; k++) if (!strcmp(kn[k], els[i].a)) { snprintf(els[i].val, sizeof els[i].val, "%s", kv[k]); els[i].dirty = 1; }
+			for (int k = 0; k < nk; k++) if (!strcmp(kn[k], els[i].a)) { snprintf(els[i].val, sizeof els[i].val, "%.159s", kv[k]); els[i].dirty = 1; }
 	layout(); clamp_scroll();
 }
 
