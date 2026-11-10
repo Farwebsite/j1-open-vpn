@@ -21,6 +21,7 @@ El Galaxy J1 de 2015 (2 núcleos a 1,2 GHz, 512 MB de RAM) no sirve ya como móv
 - **Apertura automática del puerto** en el router (UPnP) y **DNS dinámico** con Cloudflare (opcional).
 - **Red Wi-Fi propia de configuración** (`DIRECT-J1-VPN-XXXX`) para configurarlo sin cables.
 - **SSH por USB opcional** (solo con clave), activable desde el panel web.
+- **Pantalla de bloqueo** desactivable: con la pantalla apagada, una mano encima no pulsa nada; hay que deslizar para usarla.
 - **Zona horaria** seleccionable desde la pantalla o la web (España, Canarias, Latinoamérica, EE. UU.…).
 - Consumo de CPU nulo en reposo: la pantalla no gasta nada cuando está apagada.
 
@@ -33,7 +34,7 @@ Capturas reales de la pantalla del J1 (480×800), con datos de ejemplo.
 <table>
 <tr><td align="center"><img src="docs/img/inicio.png" width="200" alt="Inicio"><br><sub>Inicio</sub></td><td align="center"><img src="docs/img/wireguard.png" width="200" alt="WireGuard"><br><sub>WireGuard</sub></td><td align="center"><img src="docs/img/qr.png" width="200" alt="QR para la app"><br><sub>QR para la app</sub></td></tr>
 <tr><td align="center"><img src="docs/img/wifi.png" width="200" alt="Wi-Fi"><br><sub>Wi-Fi</sub></td><td align="center"><img src="docs/img/cliente.png" width="200" alt="Cliente VPN"><br><sub>Cliente VPN</sub></td><td align="center"><img src="docs/img/velocidad.png" width="200" alt="Prueba de velocidad"><br><sub>Prueba de velocidad</sub></td></tr>
-<tr><td align="center"><img src="docs/img/recursos.png" width="200" alt="Recursos"><br><sub>Recursos</sub></td><td align="center"><img src="docs/img/pantalla.png" width="200" alt="Brillo y apagado"><br><sub>Brillo y apagado</sub></td><td align="center"><img src="docs/img/apagar.png" width="200" alt="Botón de encendido mantenido"><br><sub>Botón de encendido mantenido</sub></td></tr>
+<tr><td align="center"><img src="docs/img/recursos.png" width="200" alt="Recursos"><br><sub>Recursos</sub></td><td align="center"><img src="docs/img/pantalla.png" width="200" alt="Brillo, bloqueo y apagado"><br><sub>Brillo, bloqueo y apagado</sub></td><td align="center"><img src="docs/img/apagar.png" width="200" alt="Botón de encendido mantenido"><br><sub>Botón de encendido mantenido</sub></td></tr>
 </table>
 
 ## Requisitos
