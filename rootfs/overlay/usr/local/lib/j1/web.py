@@ -12,18 +12,20 @@ CSS = '''
 :root{--card:#1c1c1e;--field:#2c2c2e;--line:#38383a;--txt:#ebebf5;--mut:#8e8e93;--acc:#0a84ff;--grn:#30d158;--red:#ff453a;--yel:#ffd60a;color-scheme:dark}
 *{box-sizing:border-box}html{background:#000}
 body{margin:0 auto;max-width:640px;padding:0 14px 32px;scroll-behavior:smooth;background:#000;color:var(--txt);font:16px/1.45 Inter,-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-text-size-adjust:100%}
-header{padding:18px 2px 4px}
-h1{font-size:24px;font-weight:700;margin:0 0 10px}
-.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
-.chip{display:inline-flex;align-items:center;gap:7px;background:var(--card);border-radius:99px;padding:5px 12px;font-size:13px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--grn)}.dot.y{background:var(--yel)}
-nav{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:8px 0 4px}
-nav a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;min-height:84px;padding:12px 4px;border-radius:18px;background:var(--card);color:var(--txt);text-decoration:none;font-size:13px;text-align:center}
-nav a:active{background:#3a3a3c}nav .ic{width:30px;height:30px}
-.top{position:fixed;right:16px;bottom:18px;z-index:3;width:46px;height:46px;border-radius:50%;background:var(--field);color:var(--txt);display:grid;place-items:center;text-decoration:none;font-size:22px;box-shadow:0 4px 16px rgba(0,0,0,.6)}
+header{display:flex;align-items:center;height:60px;margin:0 -14px;padding:0 14px;border-bottom:1px solid var(--card)}
+h1{font-size:20px;font-weight:650;margin:0}
+.chips{display:flex;flex-direction:column;gap:8px;margin:14px 2px 16px}
+.chip{display:flex;align-items:center;gap:10px;font-size:17px;overflow-wrap:anywhere}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--grn);flex:none}.dot.y{background:var(--yel)}
+nav{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+nav a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:124px;padding:12px 6px;border-radius:20px;background:var(--card);color:var(--txt);text-decoration:none;font-size:16px;text-align:center}
+nav a:active{background:#3a3a3c}nav .ic{width:44px;height:44px}
 .ic{width:22px;height:22px;fill:currentColor;flex:none}
-section{background:var(--card);border-radius:20px;padding:18px 18px 20px;margin:14px 0;scroll-margin-top:12px}
-h2{display:flex;align-items:center;gap:12px;font-size:19px;font-weight:650;margin:0 0 12px}
+main section{display:none}main section:target{display:block}body:has(main section:target) aside,body:not(:has(main section:target)) main>.notice{display:none}
+section{padding:0 0 12px;scroll-margin-top:0}
+h2{display:flex;align-items:center;gap:12px;height:60px;margin:0 -14px 6px;padding:0 14px;border-bottom:1px solid var(--card);font-size:20px;font-weight:650}
+h2 .tile{display:none}.back{color:var(--acc);text-decoration:none;font-size:36px;line-height:1;padding:0 8px 6px 0}
+section input,section select,section textarea,.sec,.btn2{background:var(--card)}
 .tile{width:36px;height:36px;border-radius:10px;background:var(--field);display:grid;place-items:center;flex:none}
 h3{font-size:16px;margin:22px 0 4px}
 p{margin:8px 0}a{color:var(--acc)}
@@ -45,17 +47,20 @@ code{background:var(--field);padding:2px 6px;border-radius:6px;font-size:14px;ov
 .btn2{display:inline-flex;align-items:center;gap:6px;padding:9px 12px;border-radius:12px;background:var(--field);color:var(--txt);text-decoration:none;font-weight:600;font-size:14px}.btn2 .ic{width:18px;height:18px}
 .list button{width:auto;margin:0;padding:9px 12px;font-size:14px}
 footer{color:var(--mut);font-size:13px;text-align:center;margin:26px 6px 0}footer a{color:var(--mut)}footer p{margin:6px 0}
-@media(max-width:380px){body{padding:0 10px 28px}section{padding:16px 14px 18px}nav{gap:8px}nav a{min-height:76px}}
+@media(max-width:380px){body{padding:0 10px 28px}header,h2{margin:0 -10px 6px;padding:0 10px}nav{gap:10px}nav a{min-height:112px}}
 @media(min-width:900px){body{max-width:1240px;padding:0 24px 32px}
 .app{display:grid;grid-template-columns:250px 1fr;gap:28px;align-items:start}
-aside{position:sticky;top:0;max-height:100vh;overflow-y:auto;padding-bottom:20px}
-header{padding:26px 4px 8px}.chips{flex-direction:column;align-items:flex-start}
+aside,body:has(main section:target) aside{display:block;position:sticky;top:0;max-height:100vh;overflow-y:auto;padding-bottom:20px}
+header{display:block;height:auto;margin:0;padding:26px 4px 8px;border:0}h1{font-size:22px}
+.chips{align-items:flex-start;margin:12px 0}.chip{background:var(--card);border-radius:99px;padding:5px 12px;font-size:13px;gap:7px}.dot{width:8px;height:8px}
 nav{display:flex;flex-direction:column;gap:2px;margin-top:10px}
 nav a{flex-direction:row;justify-content:flex-start;gap:12px;min-height:0;padding:10px 12px;border-radius:12px;background:none;font-size:15px}
 nav a:hover{background:var(--card)}nav .ic{width:22px;height:22px}
-main{padding-top:12px;columns:2 400px;column-gap:16px}main>.notice{column-span:all;margin:12px 0 4px}
-section{display:inline-block;width:100%;margin:0 0 16px;break-inside:avoid}
-.top{display:none}footer{margin-left:278px}}
+main{padding-top:12px;columns:2 400px;column-gap:16px}main>.notice,body:not(:has(main section:target)) main>.notice{display:block;column-span:all;margin:12px 0 4px}aside>.notice{display:none}
+main section,main section:target{display:inline-block;width:100%;margin:0 0 16px;break-inside:avoid;background:var(--card);border-radius:20px;padding:18px 18px 20px;scroll-margin-top:12px}
+h2{height:auto;margin:0 0 12px;padding:0;border:0;font-size:19px}h2 .tile{display:grid}.back{display:none}
+section input,section select,section textarea,.sec,.btn2{background:var(--field)}
+footer{margin-left:278px}}
 '''.replace('\n','')
 # ---- icons: generated by rootfs/display/gen-font.py from Material Icons (Apache 2.0)
 ICONS_SVG={
@@ -80,8 +85,14 @@ def icon(name,color=''):
     return ('<svg class=ic viewBox="0 -512 512 512" aria-hidden=true'+(' style="color:'+color+'"' if color else '')+
             '><path transform="scale(1 -1)" d="'+ICONS_SVG[name]+'"/></svg>')
 def with_icons(body):
-    # '<section id=x><h2>' gets the tile of section x
-    for sid,_,ic,color in SECTIONS:body=body.replace('<section id='+sid+'><h2>','<section id='+sid+'><h2><span class=tile>'+icon(ic,color)+'</span>',1)
+    # '<section id=x><h2>' gets the tile of section x and the back arrow (phone);
+    # its forms post to '#x' so the answer opens on the same section
+    for sid,_,ic,color in SECTIONS:
+        body=body.replace('<section id='+sid+'><h2>','<section id='+sid+'><h2><a class=back href="#top" aria-label=Volver>&#8249;</a><span class=tile>'+icon(ic,color)+'</span>',1)
+        a=body.find('<section id='+sid+'>')
+        if a>=0:
+            b=body.find('</section>',a)
+            body=body[:a]+body[a:b].replace('<form method=post>','<form method=post action="#'+sid+'">')+body[b:]
     return body
 def esc(s): return html.escape(str(s), quote=True)
 def log(s):
@@ -530,12 +541,14 @@ def page(message='',error=False):
     v=ensure_vpn_state();cf=load('cloudflare.json',{})
     try:wifi=(RUN/'wifi-summary').read_text().strip()
     except FileNotFoundError:wifi='Sin configurar'
+    note='<p class="notice'+(' err' if error else '')+'" role=status>'+esc(message)+'</p>'
     vpn_ok=RUNTIME['vpn'].startswith('Activo');wifi_ok=bool(re.search(r'\d+\.\d+\.\d+\.\d+',wifi))
     out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=theme-color content="#000000"><title>J1 VPN</title><style>'+CSS+'</style>'
-         '<div class=app id=top><aside><header><h1>J1 · Servidor VPN</h1><div class=chips><span class=chip><span class="dot'+('' if vpn_ok else ' y')+'"></span>'+esc(RUNTIME['vpn'])+'</span>'
-         '<span class=chip><span class="dot'+('' if wifi_ok else ' y')+'"></span>'+esc(wifi)+'</span></div></header><nav>'+
+         '<div class=app id=top><aside><header><h1>J1 · Servidor VPN</h1></header>'+(note if message else '')+'<div class=chips><span class=chip><span class="dot'+('' if vpn_ok else ' y')+'"></span>'+esc(RUNTIME['vpn'])+'</span>'
+         '<span class=chip><span class="dot'+('' if wifi_ok else ' y')+'"></span>'+esc(wifi)+'</span>'
+         '<span class=chip><span class="dot'+('' if RUNTIME['ddns'].startswith('Actualizado') else ' y')+'"></span>DNS: '+esc(RUNTIME['ddns'])+'</span></div><nav>'+
          ''.join('<a href="#'+sid+'">'+icon(ic,color)+esc(name)+'</a>' for sid,name,ic,color in SECTIONS)+
-         '</nav></aside><main>'+('<p class="notice'+(' err' if error else '')+'" role=status>'+esc(message)+'</p>' if message else '')]
+         '</nav></aside><main>'+(note if message else '')]
     out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button class=sec>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
     out+=['</select><details><summary>Red oculta o nombre manual</summary><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off></label></details><label>Contraseña Wi-Fi<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Guardar y conectar</button></form><p><small>La red de configuración se mantiene disponible.</small></p></section>',usb_section()]
@@ -545,7 +558,7 @@ def page(message='',error=False):
                    '<a class=btn2 href="/client/'+c['id']+'.conf">'+icon('download')+'.conf</a><form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar</button></form></li>')
     out+=['</ul><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor.</small></p></section>']
     checked=' checked' if cf.get('enabled') else ''
-    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'</main></div><a class=top href="#top" aria-label="Subir">&#8593;</a><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p><p>'+BRAND+' · <a href="https://'+REPO+'">'+REPO+'</a></p></footer></html>']
+    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'</main></div><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p><p>'+BRAND+' · <a href="https://'+REPO+'">'+REPO+'</a></p></footer></html>']
     return with_icons(''.join(out)).encode()
 
 # ---- web panel: on/off and who may reach it (set from the screen) ----
