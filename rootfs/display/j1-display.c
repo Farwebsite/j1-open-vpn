@@ -204,7 +204,7 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 	(*rows)++;
 	int m = (SW - 2 * PAD) / (*cols + 8); return m > 8 ? 8 : m < 1 ? 1 : m;
 }
-/* camera preview (W): j1-camera writes each frame to PV_FILE, 240x320 grey,
+/* camera preview (W): j1-camera writes each frame to PV_FILE, 240x320 RGB,
  * already upright; shown 300x400. While it is on screen only its area is
  * painted again, about 8 times a second, without asking web.py */
 #define PV_FILE "/run/j1-camera.preview"
@@ -212,7 +212,7 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 #define PV_H 320
 #define PV_SHOW_W 300
 #define PV_SHOW_H 400
-static uint8_t pv[PV_W * PV_H];
+static uint8_t pv[PV_W * PV_H * 3];
 static int pv_ok;
 static struct timespec pv_time;
 /* 1 when there is a new frame (or the camera went away) */
@@ -488,13 +488,11 @@ static void draw_preview(int y) {
 		text_mid(SW / 2, y + PV_SHOW_H / 2 - 12, "Encendiendo la c\xa0mara...", 1, C_MUT);
 		return;
 	}
-	static uint32_t grey[256]; static int grey_ok;
-	if (!grey_ok) { for (int g = 0; g < 256; g++) grey[g] = color(g, g, g); grey_ok = 1; }
 	for (int r = 0; r < PV_SHOW_H; r++) {
 		int yy = y + r; if (yy < clip0 || yy >= clip1) continue;
-		const uint8_t *src = pv + (size_t)(r * PV_H / PV_SHOW_H) * PV_W;
+		const uint8_t *src = pv + (size_t)(r * PV_H / PV_SHOW_H) * PV_W * 3;
 		uint32_t *d = buf + (size_t)yy * stride + x0;
-		for (int c = 0; c < PV_SHOW_W; c++) d[c] = grey[src[c * PV_W / PV_SHOW_W]];
+		for (int c = 0; c < PV_SHOW_W; c++) { const uint8_t *s = src + c * PV_W / PV_SHOW_W * 3; d[c] = color(s[0], s[1], s[2]); }
 	}
 }
 static int preview_el(void) { for (int i = 0; i < nel; i++) if (els[i].t == 'W') return i; return -1; }
