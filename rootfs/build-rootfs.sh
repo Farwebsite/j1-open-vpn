@@ -46,7 +46,7 @@ chroot "$R" /sbin/apk add --no-cache $(grep -v '^#' "$HERE/packages.txt")
 echo "== Pantalla (se compila dentro de Alpine y luego se quita el compilador)"
 chroot "$R" /sbin/apk add --no-cache --virtual .j1-build gcc musl-dev linux-headers
 mkdir -p "$R/tmp/display" "$R/usr/local/bin"
-cp "$HERE/display/j1-display.c" "$HERE/display/j1-font.h" "$R/tmp/display/"
+cp "$HERE/display/j1-display.c" "$HERE/display/j1-ui-font.h" "$R/tmp/display/"
 chroot "$R" /usr/bin/cc -Os -static -Wall -Wextra -Werror -o /usr/local/bin/j1-display /tmp/display/j1-display.c
 chroot "$R" /usr/bin/strip /usr/local/bin/j1-display
 chroot "$R" /sbin/apk del .j1-build

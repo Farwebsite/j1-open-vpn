@@ -51,7 +51,7 @@ class Tests(unittest.TestCase):
  def test_ui_home_cp437_and_buttons(self):
   (app.RUN/'wifi-summary').write_text('Wi-Fi: 10.10.1.24\n')
   out=app.ui_request(b'a=nav%3Ahome')
-  self.assertTrue(out.startswith(b'T\thome\t'));self.assertIn(b'B\tnav:wifi\tWi-Fi\ti',out);self.assertIn(b'L\tWi-Fi: 10.10.1.24\tg',out)
+  self.assertTrue(out.startswith(b'T\thome\t'));self.assertIn(b'C\tnav:wifi\tWi-Fi\twifi\n',out);self.assertIn(b'C\tnav:logs:sys\tRegistros\tlogs\n',out);self.assertIn(b'L\tWi-Fi: 10.10.1.24\tg',out)
   self.assertIn('Red de configuración'.encode('cp437'),out)
  def test_ui_error_stays_on_screen(self):
   with patch.object(app,'command',side_effect=RuntimeError('x')):

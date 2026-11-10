@@ -19,7 +19,7 @@
 #include <sys/un.h>
 #include <linux/fb.h>
 #include <linux/input.h>
-#include "j1-font.h"
+#include "j1-ui-font.h"
 
 #define SOCK "/run/j1-ui.sock"
 #define TOP 60          /* title bar */
@@ -38,7 +38,7 @@ static uint32_t *buf;
 #define G_OFF 8
 #define B_OFF 16
 static int clip0, clip1;
-static uint32_t C_ACC, C_OKB, C_LINE, C_BG, C_BAR, C_TXT, C_MUT, C_GRN, C_YEL, C_RED, C_BTN, C_PRI, C_DNG, C_ITM, C_FLD, C_KEY, C_KEYS, C_DOWN, C_WHITE, C_BLACK;
+static uint32_t C_ACC, C_OKB, C_LINE, C_BG, C_BAR, C_TXT, C_MUT, C_GRN, C_YEL, C_RED, C_BTN, C_PRI, C_DNG, C_DNGB, C_ITM, C_FLD, C_KEY, C_KEYS, C_DOWN, C_WHITE, C_BLACK;
 
 static double now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec + t.tv_nsec / 1e9; }
 static void value(const char *p, const char *s) { int fd = open(p, O_WRONLY); if (fd >= 0) { if (write(fd, s, strlen(s)) < 0) {} close(fd); } }
@@ -84,113 +84,85 @@ static void rrect(int x, int y, int w, int h, int r, uint32_t c) {
 		if (x + w - 1 - in >= 0 && x + w - 1 - in < SW) put(x + w - 1 - in, yy, mix(c, buf[(size_t)yy * stride + x + w - 1 - in], a));
 	}
 }
-/* Scale2x: doubles a 1-bit bitmap rounding the diagonals (smoother than plain 2x) */
-static void scale2x(const uint16_t *in, int w, int h, uint32_t *out) {
-#define PX(X, Y) ((X) < 0 || (Y) < 0 || (X) >= w || (Y) >= h ? 0 : (in[Y] >> (w - 1 - (X))) & 1)
-	for (int y = 0; y < h; y++) { out[2 * y] = out[2 * y + 1] = 0; }
-	for (int y = 0; y < h; y++) for (int x = 0; x < w; x++) {
-		int P = PX(x, y), A = PX(x, y - 1), B = PX(x + 1, y), C = PX(x - 1, y), D = PX(x, y + 1);
-		int e0 = (C == A && C != D && A != B) ? A : P, e1 = (A == B && A != C && B != D) ? B : P;
-		int e2 = (D == C && D != B && C != A) ? C : P, e3 = (B == D && B != A && D != C) ? D : P;
-		int bx = 2 * w - 1 - 2 * x;
-		out[2 * y] |= (uint32_t)e0 << bx | (uint32_t)e1 << (bx - 1);
-		out[2 * y + 1] |= (uint32_t)e2 << bx | (uint32_t)e3 << (bx - 1);
+/* ---- text and icons: antialiased masks from j1-ui-font.h (gen-font.py) ---- */
+/* c over the pixel with coverage a 0-255 */
+static void blend(int x, int y, uint32_t c, int a) {
+	if (!a || x < 0 || x >= SW || y < clip0 || y >= clip1) return;
+	uint32_t *p = buf + (size_t)y * stride + x;
+	*p = a == 255 ? c : mix(c, *p, a + (a >> 7));
+}
+static void mask(int x, int y, int w, int h, const uint8_t *a, uint32_t c) {
+	for (int j = 0; j < h; j++, a += w) if (y + j >= clip0 && y + j < clip1) for (int i = 0; i < w; i++) blend(x + i, y + j, c, a[i]);
+}
+static int fwidth(const struct font *f, const char *s, int n) {
+	int w = 0; for (int i = 0; i < n && s[i]; i++) w += f->g[(unsigned char)s[i]].adv; return w;
+}
+/* base = baseline; returns the x after the text */
+static int fdraw(const struct font *f, int x, int base, const char *s, int n, uint32_t c) {
+	for (int i = 0; i < n && s[i]; i++) {
+		const struct glyph *g = &f->g[(unsigned char)s[i]];
+		if (g->w) mask(x + g->ox, base + g->oy, g->w, g->h, f->a + g->off, c);
+		x += g->adv;
 	}
-#undef PX
+	return x;
 }
-static uint32_t big[256][32];   /* font at 2x, smoothed once at start */
-static void font_init(void) {
-	for (int ch = 0; ch < 256; ch++) { uint16_t g[16]; for (int j = 0; j < 16; j++) g[j] = font8x16[ch * 16 + j]; scale2x(g, 8, 16, big[ch]); }
-}
-static void glyph(int x, int y, unsigned char ch, int s, uint32_t c) {
-	if (y + 16 * s <= clip0 || y >= clip1) return;
-	if (s == 2) { for (int j = 0; j < 32; j++) { uint32_t b = big[ch][j]; for (int i = 0; i < 16; i++) if (b & (1u << (15 - i))) put(x + i, y + j, c); } return; }
-	for (int j = 0; j < 16; j++) { unsigned b = font8x16[ch * 16 + j]; for (int i = 0; i < 8; i++) if (b & (128 >> i)) fill(x + i * s, y + j * s, s, s, c); }
-}
-
-/* 16x16 icons, drawn at 32x32 with Scale2x */
-static const char *ICONS[][17] = {
-	{"wifi", "................", "....########....", "..##........##..", ".#............#.", "#....######....#", "...##......##...",
-	 "..#..........#..", "......####......", ".....#....#.....", "................", ".......##.......", "......####......",
-	 ".......##.......", "................", "................", "................"},
-	{"ap", "................", "................", ".#............#.", "#..#........#..#", "#.#..........#.#", "#.#...####...#.#",
-	 "#.#...####...#.#", "#..#...##...#..#", ".#.....##.....#.", ".......##.......", "......####......", "......#..#......",
-	 ".....#....#.....", ".....#....#.....", "....##....##....", "................"},
-	{"vpn", ".......##.......", ".....##..##.....", "...##......##...", ".##..........##.", ".#............#.", ".#.........##.#.",
-	 ".#........##..#.", ".#..##...##...#.", ".#...##.##....#.", "..#...###....#..", "..#....#.....#..", "...#........#...",
-	 "....#......#....", ".....##..##.....", ".......##.......", "................"},
-	{"dns", "................", "................", "................", "................", "......####......", ".....#....#.....",
-	 "..###......#....", ".#..........##..", "#.............#.", "#..............#", "#..............#", ".#............#.",
-	 "..############..", "................", "................", "................"},
-	{"usb", "................", ".....######.....", ".....#.##.#.....", ".....#.##.#.....", "...##########...", "...#........#...",
-	 "...#........#...", "...#........#...", "....#......#....", ".....######.....", ".......##.......", ".......##.......",
-	 ".......##.......", ".......##.......", ".......##.......", "................"},
-	{"res", "................", "............###.", "............###.", "............###.", "........###.###.", "........###.###.",
-	 "........###.###.", "....###.###.###.", "....###.###.###.", "....###.###.###.", "###.###.###.###.", "###.###.###.###.",
-	 "###.###.###.###.", "################", "................", "................"},
-	{"disp", ".......##.......", "..#....##....#..", "...#........#...", "......####......", ".....######.....", "....########....",
-	 "##..########..##", "##..########..##", "....########....", ".....######.....", "......####......", "...#........#...",
-	 "..#....##....#..", ".......##.......", "................", "................"},
-	{"logs", "................", "................", "##..##########..", "##..##########..", "................", "................",
-	 "##..########....", "##..########....", "................", "................", "##..##########..", "##..##########..",
-	 "................", "................", "##..#######.....", "##..#######....."},
-	{"sys", "......####......", "......####......", "..##..####..##..", "..############..", "...##########...", "..####....####..",
-	 "####........####", "####........####", "####........####", "####........####", "..####....####..", "...##########...",
-	 "..############..", "..##..####..##..", "......####......", "......####......"},
-	{"qr", "#######..#######", "#.....#..#.....#", "#.###.#..#.###.#", "#.###.#..#.###.#", "#.###.#..#.###.#", "#.....#..#.....#",
-	 "#######..#######", "................", "................", "#######..##..#.#", "#.....#...##..#.", "#.###.#..#..##.#",
-	 "#.###.#..##..#..", "#.###.#...##.###", "#.....#..#..#..#", "#######..###.#.#"},
-	{"ip", "................", ".....######.....", "...##..##..##...", "..#...#..#...#..", ".#...#....#...#.", ".##############.",
-	 "#....#....#....#", "#....#....#....#", "#....#....#....#", "#....#....#....#", ".##############.", ".#...#....#...#.",
-	 "..#...#..#...#..", "...##..##..##...", ".....######.....", "................"},
-	{"user", "................", "......####......", ".....######.....", ".....######.....", ".....######.....", "......####......",
-	 "................", "....########....", "...##########...", "..############..", "..############..", "..############..",
-	 "................", "................", "................", "................"},
-	{"power", "................", ".......##.......", "...#...##...#...", "..#....##....#..", ".#.....##.....#.", "#......##......#",
-	 "#......##......#", "#..............#", "#..............#", ".#............#.", "..#..........#..", "...##......##...",
-	 ".....######.....", "................", "................", "................"},
-};
-#define NICONS (int)(sizeof ICONS / sizeof ICONS[0])
-static uint32_t icon_big[NICONS][32];
-static void icons_init(void) {
-	for (int n = 0; n < NICONS; n++) {
-		uint16_t g[16];
-		for (int j = 0; j < 16; j++) { g[j] = 0; for (int i = 0; i < 16; i++) if (ICONS[n][j + 1][i] == '#') g[j] |= 1u << (15 - i); }
-		scale2x(g, 16, 16, icon_big[n]);
+/* at most maxw px: what does not fit is cut with "..." */
+static void fdraw_fit(const struct font *f, int x, int base, const char *s, int maxw, uint32_t c) {
+	int n = (int)strlen(s);
+	if (fwidth(f, s, n) > maxw) {
+		int dots = fwidth(f, "...", 3);
+		while (n > 0 && fwidth(f, s, n) + dots > maxw) n--;
+		fdraw(f, fdraw(f, x, base, s, n, c), base, "...", 3, c); return;
 	}
+	fdraw(f, x, base, s, n, c);
 }
-static int icon_id(const char *name) {
-	if (!name || !*name) return -1;
-	for (int n = 0; n < NICONS; n++) if (!strcmp(ICONS[n][0], name)) return n;
-	return -1;
-}
-static void icon(int x, int y, int n, uint32_t c) {
-	for (int j = 0; j < 32; j++) { uint32_t b = icon_big[n][j]; for (int i = 0; i < 32; i++) if (b & (1u << (31 - i))) put(x + i, y + j, c); }
-}
-static void textn(int x, int y, const char *s, int n, int sc, uint32_t c) {
-	for (int i = 0; i < n && s[i] && x + 8 * sc <= SW; i++, x += 8 * sc) glyph(x, y, (unsigned char)s[i], sc, c);
-}
-static void text(int x, int y, const char *s, int sc, uint32_t c) { textn(x, y, s, (int)strlen(s), sc, c); }
-/* any size (nearest pixel), for text between scale 1 and 2 */
-static void textwh(int x, int y, const char *s, int w, int h, uint32_t c) {
-	for (; *s && x + w <= SW; s++, x += w)
-		for (int j = 0; j < h; j++) { unsigned b = font8x16[(unsigned char)*s * 16 + j * 16 / h]; for (int i = 0; i < w; i++) if (b & (128 >> (i * 8 / w))) fill(x + i, y + j, 1, 1, c); }
-}
-/* word wrap; returns the height used */
-static int wrap(const char *s, int x, int y, int w, int sc, uint32_t c, int draw) {
-	int cols = w / (8 * sc), lh = 16 * sc + (sc > 1 ? 4 : 2), lines = 0;
-	if (cols < 1) cols = 1;
+/* size 2 = normal text in a 32 px line, 1 = small print in a 16 px line; y = top of the line */
+static const struct font *FONT(int sc) { return sc > 1 ? &f_md : &f_sm; }
+static int BASE(int sc) { return sc > 1 ? 24 : 14; }
+static int LINE(int sc) { return sc > 1 ? 32 : 22; }
+static int tw(const char *s, int sc) { return fwidth(FONT(sc), s, (int)strlen(s)); }
+static void text(int x, int y, const char *s, int sc, uint32_t c) { fdraw(FONT(sc), x, y + BASE(sc), s, (int)strlen(s), c); }
+static void text_fit(int x, int y, const char *s, int maxw, int sc, uint32_t c) { fdraw_fit(FONT(sc), x, y + BASE(sc), s, maxw, c); }
+static void text_mid(int cx, int y, const char *s, int sc, uint32_t c) { text(cx - tw(s, sc) / 2, y, s, sc, c); }
+/* word wrap in w px (center: each line centered on x + w / 2); returns the height used */
+static int wrap2(const char *s, int x, int y, int w, int sc, uint32_t c, int draw, int center) {
+	const struct font *f = FONT(sc); int lines = 0;
 	while (*s) {
-		int n = (int)strlen(s), take = n;
-		if (n > cols) { take = cols; for (int k = cols; k > cols / 2; k--) if (s[k] == ' ') { take = k; break; } }
-		if (draw) textn(x, y + lines * lh, s, take, sc, c);
+		int n = (int)strlen(s), take, sp = -1, used = 0;
+		for (take = 0; take < n; take++) {
+			int a = f->g[(unsigned char)s[take]].adv;
+			if (take && used + a > w) break;
+			if (s[take] == ' ') sp = take;
+			used += a;
+		}
+		if (take < n && sp > 0) take = sp;
+		if (draw) { int lw = fwidth(f, s, take); fdraw(f, center ? x + (w - lw) / 2 : x, y + lines * LINE(sc) + BASE(sc), s, take, c); }
 		lines++; s += take; while (*s == ' ') s++;
 	}
-	return (lines ? lines : 1) * lh;
+	return (lines ? lines : 1) * LINE(sc);
 }
+static int wrap(const char *s, int x, int y, int w, int sc, uint32_t c, int draw) { return wrap2(s, x, y, w, sc, c, draw, 0); }
+
+/* icons: Material Icons at 30 px (lists) and 46 px (home tiles) */
+#define NICONS (int)(sizeof ICON_DEFS / sizeof ICON_DEFS[0])
+static const int ICON_PX[] = ICON_SIZES;
+static int icon_id(const char *name) {
+	if (!name || !*name) return -1;
+	for (int n = 0; n < NICONS; n++) if (!strcmp(ICON_DEFS[n].name, name)) return n;
+	return -1;
+}
+static void icon_sz(int x, int y, int n, int big, uint32_t c) { int s = ICON_PX[big]; mask(x, y, s, s, ICON_DEFS[n].a[big], c); }
+static void icon(int x, int y, int n, uint32_t c) { icon_sz(x + 1, y + 1, n, 0, c); }
+/* each section has its own color, as on the home screen */
+static uint32_t icon_color(const char *name);
 
 /* ---- screen model ---- */
-struct el { char t, *a, *b, *c, *d; int y, h, dirty; char val[160]; };
+struct el { char t, *a, *b, *c, *d; int y, h, dirty, col; char val[160]; };
+/* home tiles (C): two per row */
+#define TGAP 12
+#define TILE_H 140
+static int tile_w(void) { return (SW - 2 * PAD - TGAP) / 2; }
+static int tile_x(const struct el *e) { return PAD + e->col * (tile_w() + TGAP); }
 static struct el els[MAXEL];
 static int nel, content_h, scroll, refresh_s, idle_s = 60;
 static void set_deadline(void), set_bright(void);
@@ -218,12 +190,16 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 static void layout(void) {
 	int y = 8, w = SW - 2 * PAD;
 	for (int i = 0; i < nel; i++) {
-		struct el *e = &els[i]; e->y = y; e->h = 0;
+		struct el *e = &els[i]; e->y = y; e->h = 0; e->col = 0;
+		/* second tile of a row: same line as the first */
+		if (e->t == 'C' && i && els[i - 1].t == 'C' && !els[i - 1].col) { e->col = 1; e->y = els[i - 1].y; e->h = els[i - 1].h; continue; }
 		switch (e->t) {
+		case 'C': e->h = TILE_H + TGAP; break;
 		case 'M': e->h = wrap(e->a, 0, 0, w - 16, 2, 0, 0) + 20; break;
 		case 'L': { char k = e->b ? *e->b : 'n'; int dot = k == 'g' || k == 'y' || k == 'r';   /* same width as when drawn */
 			e->h = wrap(e->a, 0, 0, dot ? w - 26 : w, 2, 0, 0) + 6; break; }
-		case 'l': e->h = wrap(e->a, 0, 0, w, 1, 0, 0); break;
+		case 'l': e->h = wrap(e->a, 0, 0, w, 1, 0, 0) + 4; break;
+		case 'P': e->h = 26; break;
 		case 'B': e->h = (e->c && *e->c == 'i') ? 66 : 72; break;
 		case 'S': case 'D': e->h = 72; break;
 		case 'F': e->h = 22 + 54 + 12; break;
@@ -324,22 +300,25 @@ static void draw_keyboard(void) {
 	struct key k[64]; int n = keys(k);
 	clip0 = 0; clip1 = SH;
 	fill(0, KBY - PVH, SW, SH - KBY + PVH, C_BAR);
-	text(PAD, KBY - PVH + 6, kb_el && kb_el->b ? kb_el->b : "", 1, C_MUT);
+	fill(0, KBY - PVH, SW, 1, C_LINE);
+	text(PAD, KBY - PVH + 4, kb_el && kb_el->b ? kb_el->b : "", 1, C_MUT);
 	char shown_txt[160]; int len = (int)strlen(kb_buf);
 	if (kb_el && kb_el->d && *kb_el->d == 'p' && !kb_show) { memset(shown_txt, '*', len); shown_txt[len] = 0; }
 	else snprintf(shown_txt, sizeof shown_txt, "%s", kb_buf);
-	int cols = (SW - 150 - PAD) / 16; const char *t = shown_txt; if (len > cols - 1) t += len - (cols - 1);
+	/* the end of the text (where the cursor is) stays visible */
+	int room = SW - 150 - PAD - 16; const char *t = shown_txt;
+	while (*t && tw(t, 2) > room) t++;
 	rrect(PAD - 4, KBY - PVH + 28, SW - 150, 48, 10, C_FLD);
-	text(PAD, KBY - PVH + 36, t, 2, C_WHITE);
-	glyph(PAD + 16 * (int)strlen(t), KBY - PVH + 36, '_', 2, C_ACC);
+	text(PAD + 4, KBY - PVH + 36, t, 2, C_WHITE);
+	fill(PAD + 6 + tw(t, 2), KBY - PVH + 38, 2, 30, C_ACC);   /* cursor */
 	for (int i = 0; i < n; i++) {
-		if (k[i].code == K_CANCEL || k[i].code == K_SHOW) { int sc = 2; text(k[i].x + (k[i].w - (int)strlen(k[i].label) * 8 * sc) / 2, k[i].y + 26, k[i].label, sc, k[i].code == K_CANCEL ? C_RED : C_ACC); continue; }
+		if (k[i].code == K_CANCEL || k[i].code == K_SHOW) { text_mid(k[i].x + k[i].w / 2, k[i].y + 26, k[i].label, 2, k[i].code == K_CANCEL ? C_RED : C_ACC); continue; }
 		uint32_t bg = i == kb_down ? C_DOWN : (k[i].code >= 256 ? C_KEYS : C_KEY);
-		if (k[i].code == K_OK) bg = i == kb_down ? C_DOWN : C_PRI;
+		if (k[i].code == K_OK) bg = i == kb_down ? C_DOWN : C_ACC;
 		if (k[i].code == K_SHIFT && kb_shift) bg = C_ACC;
 		rrect(k[i].x + 3, k[i].y + 4, k[i].w - 6, k[i].h - 8, 9, bg);
-		int sc = strlen(k[i].label) > 3 ? 1 : 2, tw = (int)strlen(k[i].label) * 8 * sc;
-		text(k[i].x + (k[i].w - tw) / 2, k[i].y + (k[i].h - 16 * sc) / 2, k[i].label, sc, k[i].code == K_OK ? C_BLACK : C_WHITE);
+		int sc = strlen(k[i].label) > 3 ? 1 : 2;
+		text_mid(k[i].x + k[i].w / 2, k[i].y + (k[i].h - (sc > 1 ? 32 : 18)) / 2, k[i].label, sc, C_WHITE);
 	}
 }
 
@@ -373,24 +352,39 @@ static void tz_follow(void) {
 #define LK_K 76         /* knob */
 static int lock_y(void) { return SH - 200; }
 static int lock_range(void) { return SW - 2 * PAD - 8 - LK_K; }
+static int battery(int *chg) {
+	char bat[8] = "", st[16] = ""; FILE *in = fopen("/sys/class/power_supply/battery/capacity", "r");
+	if (in) { if (!fgets(bat, sizeof bat, in)) bat[0] = 0; fclose(in); }
+	if ((in = fopen("/sys/class/power_supply/battery/status", "r"))) { if (!fgets(st, sizeof st, in)) st[0] = 0; fclose(in); }
+	*chg = !strncmp(st, "Charging", 8) || !strncmp(st, "Full", 4);
+	return bat[0] ? atoi(bat) : -1;
+}
 static void render_lock(void) {
 	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
-	char clock[16], date[16], bat[8] = "", line[40]; time_t t = time(NULL);
+	char clock[16], date[16], line[40]; time_t t = time(NULL); int chg, pct = battery(&chg);
 	tz_follow();
 	strftime(clock, sizeof clock, "%H:%M", localtime(&t));
 	strftime(date, sizeof date, "%d/%m/%Y", localtime(&t));
-	text((SW - 5 * 56) / 2, SH / 5, clock, 7, C_WHITE);
-	text((SW - (int)strlen(date) * 16) / 2, SH / 5 + 130, date, 2, C_MUT);
-	FILE *in = fopen("/sys/class/power_supply/battery/capacity", "r");
-	if (in) { if (fgets(bat, sizeof bat, in)) bat[strcspn(bat, "\n")] = 0; fclose(in); }
-	if (bat[0]) { snprintf(line, sizeof line, "Bater\xa1" "a %d%%", atoi(bat)); text((SW - (int)strlen(line) * 16) / 2, SH / 5 + 170, line, 2, C_MUT); }
+	fdraw(&f_xl, (SW - fwidth(&f_xl, clock, 5)) / 2, SH / 5 + 100, clock, 5, C_WHITE);
+	text_mid(SW / 2, SH / 5 + 130, date, 2, C_MUT);
+	if (pct >= 0) { snprintf(line, sizeof line, "Bater\xa1" "a %d%%%s", pct, chg ? " \xfa cargando" : ""); text_mid(SW / 2, SH / 5 + 170, line, 2, C_MUT); }
 	int y = lock_y(), x0 = PAD + 4, kx = x0 + lock_x;
 	rrect(PAD, y, SW - 2 * PAD, LK_H, LK_H / 2, C_ITM);
 	if (lock_x > 0) rrect(x0, y + 4, lock_x + LK_K, LK_K, LK_K / 2, C_ACC);
-	else textwh(x0 + LK_K + (lock_range() - 24 * 12) / 2, y + 30, "Desliza para desbloquear", 12, 24, C_MUT);
+	else text_mid(x0 + LK_K + lock_range() / 2, y + 26, "Desliza para desbloquear", 2, C_MUT);
 	rrect(kx, y + 4, LK_K, LK_K, LK_K / 2, C_WHITE);
-	text(kx + LK_K / 2 - 8, y + 4 + LK_K / 2 - 16, ">", 2, C_BLACK);
+	icon_sz(kx + (LK_K - 30) / 2, y + 4 + (LK_K - 30) / 2, icon_id("lock"), 0, C_BLACK);
 	present();
+}
+/* each section has its own color (home tiles and list icons) */
+static uint32_t icon_color(const char *name) {
+	static const struct { const char *n; unsigned char r, g, b; } P[] = {
+		{"wifi", 48, 209, 88}, {"ap", 100, 210, 255}, {"vpn", 255, 159, 10}, {"dns", 10, 132, 255},
+		{"usb", 191, 90, 242}, {"res", 255, 55, 95}, {"disp", 255, 214, 10}, {"logs", 94, 92, 230},
+		{"sys", 152, 152, 157}, {"qr", 235, 235, 245}, {"ip", 100, 210, 255}, {"user", 10, 132, 255},
+		{"power", 255, 69, 58}, {"speed", 48, 209, 88}, {"tz", 255, 159, 10}, {"lock", 152, 152, 157}};
+	for (size_t i = 0; name && i < sizeof P / sizeof P[0]; i++) if (!strcmp(P[i].n, name)) return color(P[i].r, P[i].g, P[i].b);
+	return C_ACC;
 }
 static void render(void) {
 	if (locked) { render_lock(); return; }
@@ -403,59 +397,74 @@ static void render(void) {
 		switch (e->t) {
 		case 'M': {
 			int err = e->b && *e->b == 'e';
-			rrect(PAD, y, w, e->h - 8, 12, err ? C_DNG : C_OKB);
-			wrap(e->a, PAD + 12, y + 6, w - 24, 2, err ? C_BLACK : C_GRN, 1); break; }
+			rrect(PAD, y, w, e->h - 8, 14, err ? C_DNG : C_OKB);
+			wrap(e->a, PAD + 14, y + 6, w - 28, 2, err ? C_RED : C_GRN, 1); break; }
 		case 'L': {
 			/* status lines get a colored dot */
 			char k = e->b ? *e->b : 'n';
-			if (k == 'g' || k == 'y' || k == 'r') { rrect(PAD + 2, y + 10, 14, 14, 7, tcolor(e->b)); wrap(e->a, PAD + 26, y, w - 26, 2, k == 'y' || k == 'r' ? tcolor(e->b) : C_TXT, 1); }
+			if (k == 'g' || k == 'y' || k == 'r') { rrect(PAD + 3, y + 11, 11, 11, 6, tcolor(e->b)); wrap(e->a, PAD + 24, y, w - 24, 2, k == 'y' || k == 'r' ? tcolor(e->b) : C_TXT, 1); }
 			else wrap(e->a, PAD, y, w, 2, tcolor(e->b), 1);
 			break; }
 		case 'l': wrap(e->a, PAD, y, w, 1, tcolor(e->b), 1); break;
+		case 'P': {   /* table row: name, then two right-aligned columns */
+			uint32_t c = tcolor(e->d); const char *b = e->b ? e->b : "", *cc = e->c ? e->c : "";
+			int c3 = SW - PAD - 4, c2 = c3 - 150;
+			text_fit(PAD, y, e->a, c2 - 110 - PAD, 1, c);
+			text(c2 - tw(b, 1), y, b, 1, C_MUT); text(c3 - tw(cc, 1), y, cc, 1, c);
+			break; }
+		case 'C': {   /* home tile: colored icon over its name */
+			int x = tile_x(e), tw0 = tile_w(), ic = icon_id(e->c);
+			rrect(x, y, tw0, TILE_H, 20, i == pressed ? C_DOWN : C_ITM);
+			if (ic >= 0) icon_sz(x + (tw0 - 46) / 2, y + 22, ic, 1, icon_color(e->c));
+			const char *s = e->b ? e->b : "";
+			int lines = wrap2(s, 0, 0, tw0 - 20, 2, 0, 0, 1) / LINE(2);
+			wrap2(s, x + 10, y + (lines > 1 ? 72 : 84), tw0 - 20, 2, C_TXT, 1, 1);
+			break; }
 		case 'B': {
-			char st = e->c ? *e->c : 'n'; uint32_t bg = st == 'p' ? C_PRI : st == 'd' ? C_DNG : st == 'i' ? C_ITM : C_BTN;
+			char st = e->c ? *e->c : 'n'; uint32_t bg = st == 'p' ? C_ACC : st == 'd' ? C_DNGB : st == 'i' ? C_ITM : C_BTN;
 			if (i == pressed) bg = C_DOWN;
-			rrect(PAD, y, w, e->h - 8, 14, bg);
-			uint32_t fg = (st == 'p' || st == 'd') && i != pressed ? C_BLACK : C_WHITE;
+			rrect(PAD, y, w, e->h - 8, 16, bg);
+			uint32_t fg = st == 'd' && i != pressed ? C_RED : C_WHITE;
 			int ic = icon_id(e->d), ty = y + (e->h - 8 - 32) / 2;
+			const char *s = e->b ? e->b : "";
 			if (st == 'i') {
-				int tx2 = PAD + 16;
-				if (ic >= 0) { icon(tx2, ty, ic, i == pressed ? C_WHITE : C_ACC); tx2 += 46; }
-				textn(tx2, ty, e->b ? e->b : "", (SW - PAD - 40 - tx2) / 16, 2, fg);
-				text(SW - PAD - 30, ty, ">", 2, C_MUT);
+				int tx2 = PAD + 18;
+				if (ic >= 0) { icon(tx2, ty, ic, i == pressed ? C_WHITE : icon_color(e->d)); tx2 += 48; }
+				text_fit(tx2, ty, s, SW - PAD - 44 - tx2, 2, fg);
+				icon(SW - PAD - 38, ty, icon_id("more"), C_MUT);
 			} else {
-				int n = (int)strlen(e->b ? e->b : ""), iw = ic >= 0 ? 44 : 0, mx = (w - 16 - iw) / 16; if (n > mx) n = mx;
-				int x0 = PAD + (w - n * 16 - iw) / 2;
+				int iw = ic >= 0 ? 42 : 0, room = w - 24 - iw, n = tw(s, 2) < room ? tw(s, 2) : room;
+				int x0 = PAD + (w - n - iw) / 2;
 				if (ic >= 0) icon(x0, ty, ic, fg);
-				textn(x0 + iw, ty, e->b ? e->b : "", n, 2, fg);
+				text_fit(x0 + iw, ty, s, room, 2, fg);
 			}
 			break; }
 		case 'S': {
 			int on = e->c && *e->c == '1';
-			rrect(PAD, y, w, e->h - 8, 14, i == pressed ? C_DOWN : C_ITM);
-			textn(PAD + 16, y + 16, e->b ? e->b : "", (w - 124) / 16, 2, C_WHITE);
+			rrect(PAD, y, w, e->h - 8, 16, i == pressed ? C_DOWN : C_ITM);
+			text_fit(PAD + 18, y + 16, e->b ? e->b : "", w - 130, 2, C_WHITE);
 			int sx = SW - PAD - 96, sy = y + 14;
-			rrect(sx, sy, 80, 36, 18, on ? C_ACC : C_KEYS);
+			rrect(sx, sy, 80, 36, 18, on ? C_GRN : C_KEYS);
 			rrect(on ? sx + 46 : sx + 4, sy + 4, 28, 28, 14, C_WHITE);
 			break; }
 		case 'D': {   /* slider: track, filled part, knob, percentage */
 			int lo, hi, v = slider_val(e, &lo, &hi), x0 = PAD + 24, x1 = SW - PAD - 104;
 			int kx = x0 + (v - lo) * (x1 - x0) / (hi - lo);
 			char pct[8]; snprintf(pct, sizeof pct, "%d%%", v * 100 / hi);
-			rrect(PAD, y, w, e->h - 8, 14, C_ITM);
-			rrect(x0, y + 26, x1 - x0, 12, 6, C_KEYS);
-			if (kx - x0 >= 12) rrect(x0, y + 26, kx - x0, 12, 6, C_ACC);
-			rrect(kx - 16, y + 16, 32, 32, 16, C_WHITE);
-			text(SW - PAD - 80, y + 16, pct, 2, C_WHITE);
+			rrect(PAD, y, w, e->h - 8, 16, C_ITM);
+			rrect(x0, y + 28, x1 - x0, 8, 4, C_KEYS);
+			if (kx - x0 >= 8) rrect(x0, y + 28, kx - x0, 8, 4, C_ACC);
+			rrect(kx - 15, y + 17, 30, 30, 15, C_WHITE);
+			text(SW - PAD - 76, y + 16, pct, 2, C_WHITE);
 			break; }
 		case 'F': {
-			text(PAD + 4, y + 2, e->b ? e->b : "", 1, C_MUT);
-			rrect(PAD, y + 22, w, 54, 12, e->dirty ? C_YEL : i == pressed ? C_DOWN : C_KEYS);
+			text(PAD + 4, y, e->b ? e->b : "", 1, C_MUT);
+			rrect(PAD, y + 22, w, 54, 12, e->dirty ? C_YEL : i == pressed ? C_ACC : C_KEYS);
 			rrect(PAD + 2, y + 24, w - 4, 50, 10, C_FLD);
 			char tmp[160]; const char *s = e->val; int n = (int)strlen(s);
 			if (e->d && *e->d == 'p') { memset(tmp, '*', n); tmp[n] = 0; s = tmp; }
-			if (!n) text(PAD + 10, y + 33, "(tocar para escribir)", 2, C_MUT);
-			else { int mx = (w - 20) / 16; textn(PAD + 10, y + 33, n > mx ? s + n - mx : s, mx, 2, C_WHITE); }
+			if (!n) text(PAD + 12, y + 33, "Tocar para escribir", 2, C_MUT);
+			else { while (*s && tw(s, 2) > w - 24) s++; text(PAD + 12, y + 33, s, 2, C_WHITE); }
 			break; }
 		case 'Q': {
 			int c, r, m = qr_dims(e->a, &c, &r), qw = (c + 8) * m, x0 = (SW - qw) / 2;
@@ -475,26 +484,25 @@ static void render(void) {
 	fill(0, 0, SW, TOP, C_BAR);
 	fill(0, TOP - 1, SW, 1, C_LINE);
 	int tx = PAD;
-	if (back[0]) { if (pressed == -2) rrect(6, 6, 60, TOP - 12, 12, C_DOWN); text(20, 14, "<", 2, C_ACC); tx = 76; }
-	/* top right: battery and clock */
-	char clock[16], bat[8] = "", st[16] = ""; time_t t = time(NULL);
+	if (back[0]) { if (pressed == -2) rrect(6, 8, 56, TOP - 16, 12, C_DOWN); icon_sz(18, (TOP - 30) / 2, icon_id("back"), 0, C_ACC); tx = 68; }
+	/* top right: clock and battery on one line; the title keeps the rest */
+	char clock[16], b[12]; time_t t = time(NULL); int chg, pct = battery(&chg);
 	tz_follow();
 	strftime(clock, sizeof clock, "%H:%M", localtime(&t));
-	FILE *in = fopen("/sys/class/power_supply/battery/capacity", "r");
-	if (in) { if (fgets(bat, sizeof bat, in)) bat[strcspn(bat, "\n")] = 0; fclose(in); }
-	if ((in = fopen("/sys/class/power_supply/battery/status", "r"))) { if (!fgets(st, sizeof st, in)) st[0] = 0; fclose(in); }
-	int chg = !strncmp(st, "Charging", 8) || !strncmp(st, "Full", 4), pct = atoi(bat);
-	/* clock on top, battery under it; the title keeps the rest */
-	int bx = SW - 8 - 92;
-	textn(tx, 14, title, (bx - tx - 8) / 16, 2, C_WHITE);
-	if (bat[0]) {
-		char b[8]; snprintf(b, sizeof b, "%d%%", pct);
-		uint32_t bc = pct <= 15 && !chg ? C_RED : chg ? C_GRN : C_MUT;
-		rrect(bx, 36, 21, 16, 4, bc); rrect(bx + 2, 38, 17, 12, 3, C_BAR); if (pct > 0) rrect(bx + 3, 39, (pct * 15 + 99) / 100, 10, 2, bc); rrect(bx + 21, 40, 3, 8, 1, bc);
-		textwh(bx + 26, 31, b, 13, 26, bc); if (chg) textwh(bx + 26 + 13 * (int)strlen(b), 31, "+", 13, 26, C_GRN);
+	int base = 38, rx = SW - PAD;
+	if (pct >= 0) {
+		uint32_t bc = pct <= 15 && !chg ? C_RED : chg ? C_GRN : C_TXT;
+		snprintf(b, sizeof b, "%d%%", pct);
+		rx -= fwidth(&f_st, b, (int)strlen(b)); fdraw(&f_st, rx, base, b, 8, bc);
+		rx -= 34;   /* battery outline, fill and tip */
+		rrect(rx, base - 14, 26, 14, 4, C_MUT); rrect(rx + 2, base - 12, 22, 10, 3, C_BAR);
+		if (pct > 0) rrect(rx + 3, base - 11, (pct * 20 + 99) / 100, 8, 2, bc);
+		rrect(rx + 26, base - 10, 3, 6, 1, C_MUT);
+		rx -= 12;
 	}
-	textwh(bx + 92 - 65, 3, clock, 13, 26, C_MUT);  /* same size as the battery */
-	if (busy) { rrect(60, SH / 2 - 50, SW - 120, 100, 18, C_YEL); text(SW / 2 - 5 * 16, SH / 2 - 16, "Un momento", 2, C_BLACK); }
+	rx -= fwidth(&f_st, clock, 5); fdraw(&f_st, rx, base, clock, 5, C_TXT);
+	fdraw_fit(&f_tt, tx, base + 1, title, rx - tx - 12, C_WHITE);
+	if (busy) { rrect(60, SH / 2 - 50, SW - 120, 100, 20, C_BTN); text_mid(SW / 2, SH / 2 - 16, "Un momento...", 2, C_WHITE); }
 	if (kb_open) draw_keyboard();
 	present();
 }
@@ -616,6 +624,7 @@ static int hit(int x, int y) {
 	int cy = y - TOP + scroll;
 	for (int i = 0; i < nel; i++) {
 		struct el *e = &els[i];
+		if (e->t == 'C' && cy >= e->y && cy < e->y + TILE_H && x >= tile_x(e) && x < tile_x(e) + tile_w()) return i;
 		if ((e->t == 'B' || e->t == 'S' || e->t == 'F' || e->t == 'D') && cy >= e->y && cy < e->y + e->h - 6) return i;
 	}
 	return -1;
@@ -824,14 +833,14 @@ int main(void) {
 	mem = mmap(NULL, f.smem_len, PROT_READ | PROT_WRITE, MAP_SHARED, fb, 0); if (mem == MAP_FAILED) { perror("mmap"); return 1; }
 	backbuf = malloc((size_t)SH * f.line_length); if (!backbuf) { perror("malloc"); return 1; }
 	show_page0();
-	C_BG = color(11, 20, 32); C_BAR = color(20, 33, 51); C_TXT = color(220, 232, 240); C_MUT = color(140, 165, 190);
-	C_GRN = color(80, 230, 160); C_YEL = color(240, 200, 90); C_RED = color(240, 110, 110); C_BTN = color(48, 65, 88);
-	/* accent: blue (icons, switches, primary buttons) */
-	C_ACC = color(70, 165, 245);
-	C_PRI = color(140, 200, 250); C_DNG = color(244, 180, 180); C_ITM = color(28, 44, 66); C_FLD = color(6, 12, 20);
-	C_KEY = color(60, 78, 102); C_KEYS = color(38, 52, 72); C_DOWN = color(90, 130, 170); C_WHITE = color(240, 246, 250); C_BLACK = color(10, 20, 16);
-	C_OKB = color(24, 52, 46); C_LINE = color(40, 58, 82);
-	font_init(); icons_init();
+	/* black background with gray cards (dark system palette) */
+	C_BG = color(0, 0, 0); C_BAR = color(0, 0, 0); C_TXT = color(235, 235, 245); C_MUT = color(142, 142, 147);
+	C_GRN = color(48, 209, 88); C_YEL = color(255, 214, 10); C_RED = color(255, 69, 58); C_BTN = color(44, 44, 46);
+	/* accent: blue (primary buttons, sliders, cursor) */
+	C_ACC = color(10, 132, 255);
+	C_PRI = C_ACC; C_DNG = color(58, 20, 20); C_DNGB = color(58, 22, 22); C_ITM = color(28, 28, 30); C_FLD = color(10, 10, 12);
+	C_KEY = color(58, 58, 60); C_KEYS = color(44, 44, 46); C_DOWN = color(72, 72, 74); C_WHITE = color(255, 255, 255); C_BLACK = color(0, 0, 0);
+	C_OKB = color(16, 44, 26); C_LINE = color(28, 28, 30);
 	/* J1_UI_KEYS / J1_UI_TOUCH / J1_UI_DEBUG: other input devices and timings (testing) */
 	char kdev[64], tdev[64];
 	evkey = open(getenv("J1_UI_KEYS") ? getenv("J1_UI_KEYS") : find_input("sci-keypad", kdev), O_RDONLY | O_NONBLOCK);

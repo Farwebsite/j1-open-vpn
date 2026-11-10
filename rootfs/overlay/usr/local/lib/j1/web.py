@@ -516,7 +516,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 # Reply: one widget per line, tab separated, cp437 (the screen font):
 #  T id title back | R seconds | M text kind(o/e) | L text color | l small-text color
 #  B action text style(n/p/d/i) | S action text 0/1 | F name label value kind(t/p/n/i)
-#  Q row,row,... (QR, 1 = dark) | G (gap)
+#  Q row,row,... (QR, 1 = dark) | G (gap) | C action text icon (home tile, two per row)
+#  P name column column color (table row, small print) | D action value min max (slider) | O idle-seconds | V brightness | K lock-screen 0/1
 LOGS = Path('/root/j1-logs')
 def cp437(s):
     out=[]
@@ -536,6 +537,7 @@ class Screen:
     def label(s,t,c='n'):return s.add('L',t,c)
     def small(s,t,c='n'):return s.add('l',t,c)
     def button(s,a,t,st='n',ic=''):return s.add('B',a,t,st,ic)
+    def tile(s,a,t,ic):return s.add('C',a,t,ic)
     def toggle(s,a,t,on):return s.add('S',a,t,'1' if on else '0')
     def field(s,n,l,v='',k='t'):return s.add('F',n,l,v,k)
     def gap(s):return s.add('G')
@@ -701,7 +703,7 @@ def ui_res(arg):
             if pid in prev['procs'] and rss:
                 u=use.setdefault(name,[0,0]);u[0]+=ticks-prev['procs'][pid][1];u[1]+=rss
         for name,(ticks,rss) in sorted(use.items(),key=lambda x:(-x[1][0],-x[1][1]))[:8]:
-            s.small('%-16s CPU %5.1f%%  RAM %5.1f MB'%(name[:16],100*ticks/dt,rss/1024),'g' if name=='wireguard-go' else 'n')
+            s.add('P',name[:16],'CPU %.1f%%'%(100*ticks/dt),'RAM %.1f MB'%(rss/1024),'g' if name=='wireguard-go' else 'n')
         if 'wireguard-go' not in use:s.small('WireGuard en el kernel: su CPU va en "CPU total" (sin proceso propio).','g')
     try:
         mem={l.split(':')[0]:int(l.split()[1]) for l in Path('/proc/meminfo').read_text().splitlines() if l.split()[1:2]}
@@ -721,8 +723,9 @@ def ui_home():
     s.label(readrun('vpn-summary','WG: ?'),'g' if RUNTIME['vpn'].startswith('Activo') else 'y')
     s.label('DNS: '+RUNTIME['ddns'],'g' if RUNTIME['ddns'].startswith('Actualizado') else 'm')
     s.label('Red config: apagada' if (STATE/'ap-off').exists() else readrun('ap-name')+' · '+readrun('ap-password'),'m')
-    for a,t in (('wifi','Wi-Fi'),('ap','Red de configuración'),('vpn','WireGuard'),('dns','Cloudflare DNS'),('usb','Cable USB'),('res','Recursos'),('disp','Pantalla'),('logs:sys','Registros'),('sys','Sistema')):
-        s.button('nav:'+a,t,'i',a.split(':')[0])
+    for a,t in (('wifi','Wi-Fi'),('ap','Red de configuración'),('vpn','WireGuard'),('dns','Cloudflare DNS'),('usb','Cable USB'),
+                ('speed','Velocidad'),('res','Recursos'),('disp','Pantalla'),('logs:sys','Registros'),('sys','Sistema')):
+        s.tile('nav:'+a,t,a.split(':')[0])
     return s.gap().small(BRAND,'m')
 
 def ui_wifi(arg):

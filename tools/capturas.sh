@@ -3,14 +3,14 @@
 # Screenshots for the documentation, on the J1 (needs gcc: apk add gcc musl-dev
 # linux-headers). Shows invented data (tools/demo-pantalla.py), never the real
 # configuration. The real screen is stopped meanwhile and started again at the end.
-# usage: sh capturas.sh <folder with web.py j1-display.c j1-font.h demo-pantalla.py j1-captura.py> <outdir>
+# usage: sh capturas.sh <folder with web.py j1-display.c j1-ui-font.h demo-pantalla.py j1-captura.py> <outdir>
 set -e
 SRC=$1 OUT=$2
 D=/tmp/j1demo
 mkdir -p "$D" "$OUT"
 sed 's|#define SOCK "/run/j1-ui.sock"|#define SOCK "/tmp/j1demo/run/j1-ui.sock"|' "$SRC/j1-display.c" >"$D/j1-display.c"
 grep -q /tmp/j1demo/run "$D/j1-display.c"
-cp "$SRC/j1-font.h" "$D/"
+cp "$SRC/j1-ui-font.h" "$D/"
 cc -Os -static -o "$D/j1-display" "$D/j1-display.c"
 python3 "$SRC/demo-pantalla.py" "$SRC/web.py" >"$D/demo.log" 2>&1 &
 DEMO=$!

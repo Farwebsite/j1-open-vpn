@@ -77,7 +77,7 @@ build.sh   Compila todo
 
 ## Licencia y créditos
 
-GPL-2.0 ([LICENSE](LICENSE)). Usa: [Alpine Linux](https://alpinelinux.org), [WireGuard](https://www.wireguard.com) ([wireguard-linux-compat](https://github.com/WireGuard/wireguard-linux-compat)), el kernel j13g de [jnkcode](https://github.com/jnkcode/android_kernel_samsung_j13g) (LineageOS), [Heimdall](https://github.com/Benjamin-Dobell/Heimdall).
+GPL-2.0 ([LICENSE](LICENSE)). Usa: [Alpine Linux](https://alpinelinux.org), [WireGuard](https://www.wireguard.com) ([wireguard-linux-compat](https://github.com/WireGuard/wireguard-linux-compat)), el kernel j13g de [jnkcode](https://github.com/jnkcode/android_kernel_samsung_j13g) (LineageOS), [Heimdall](https://github.com/Benjamin-Dobell/Heimdall). La pantalla usa la tipografía [Inter](https://rsms.me/inter/) (SIL OFL 1.1) y los iconos [Material Icons](https://github.com/google/material-design-icons) (Apache 2.0); sus licencias están en `rootfs/display/fonts/`.
 
 El firmware Wi-Fi y la MAC son de Samsung y **no se incluyen**: el J1 los copia de su propio Android en el primer arranque.
 

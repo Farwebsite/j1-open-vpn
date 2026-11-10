@@ -71,7 +71,7 @@ Las versiones están fijadas para que el resultado sea siempre el mismo:
   - `usr/local/sbin/j1-udhcpc`: direcciones y rutas (cable con prioridad sobre el Wi-Fi).
   - `usr/local/lib/j1/web.py`: lógica de WireGuard, Wi-Fi, UPnP, Cloudflare, panel web y las vistas de la pantalla.
   - `usr/local/sbin/j1-klog`: registro persistente del kernel (sin el ruido de los drivers).
-- `display/j1-display.c`: la pantalla táctil (C, estático, sin dependencias). Dibuja directamente en el framebuffer y pide cada vista a `web.py` por un socket local.
+- `display/j1-display.c`: la pantalla táctil (C, estático, sin dependencias). Dibuja directamente en el framebuffer y pide cada vista a `web.py` por un socket local. Las letras y los iconos van ya convertidos en `display/j1-ui-font.h`; solo hay que regenerarlo (`python3 display/gen-font.py`, necesita Pillow y fontTools) si se cambian las fuentes de `display/fonts/`, los tamaños o los iconos.
 
 ## Pruebas
 

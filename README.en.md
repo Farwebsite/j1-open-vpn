@@ -35,6 +35,6 @@ Android stops booting, but your Android data is not erased. Flash the stock firm
 
 Full guide (Spanish): [docs/instalacion.md](docs/instalacion.md). Build from source: [docs/compilar.md](docs/compilar.md) (`sudo ./build.sh` on Linux/WSL2 with `qemu-user-static`).
 
-License: GPL-2.0. No warranty: flashing can brick your phone.
+License: GPL-2.0 (screen font: Inter, SIL OFL 1.1; icons: Material Icons, Apache 2.0, see `rootfs/display/fonts/`). No warranty: flashing can brick your phone.
 
 © 2026 Farweb
