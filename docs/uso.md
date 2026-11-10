@@ -34,6 +34,12 @@ Desde un dispositivo conectado a la red de configuración: **http://192.168.78.1
 
 Permite lo mismo que la pantalla y además **descargar el archivo `.conf`** de cada cliente para ordenadores.
 
+En la pantalla, **Panel web** (baldosa de la segunda página del inicio):
+
+- **Panel web** activado/desactivado. Desactivado, el puerto 80 queda cerrado; la pantalla sigue funcionando igual.
+- **Acceso desde la red local** (desactivado de serie): el panel responde también en la IP del J1 en tu red de casa (Wi-Fi o cable), sea fija o por DHCP; la pantalla muestra la dirección (`http://IP-del-J1`). En la red local va sin cifrar (HTTP): úsalo solo en casa. Por la VPN el panel nunca responde.
+- **IP de la Wi-Fi / IP del cable:** accesos directos para poner esa IP por DHCP o fija.
+
 El panel **no** debe publicarse en Internet: no redirijas el TCP 80 en el router.
 
 **Conexión USB con el PC:** el J1 aparece como una tarjeta de red USB (RNDIS) y le da al PC la IP `192.168.77.2` automáticamente. Windows 10/11 la reconoce sola. Si en el Administrador de dispositivos sale como dispositivo desconocido (*J13G-Linux-USB*), actualiza su driver: *Buscar en mi equipo → Elegir de una lista → Adaptadores de red → Microsoft → Dispositivo compatible con NDIS remoto*. Si el PC no recibe IP, ponle a mano `192.168.77.2`, máscara `255.255.255.252`.

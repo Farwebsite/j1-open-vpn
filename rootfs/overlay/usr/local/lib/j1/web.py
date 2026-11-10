@@ -451,6 +451,41 @@ def page(message=''):
     out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'<footer><small>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</small><p><small>'+BRAND+' · <a href="https://'+REPO+'">'+REPO+'</a></small></footer></html>']
     return ''.join(out).encode()
 
+# ---- web panel: on/off and who may reach it (set from the screen) ----
+PANEL_FIXED=('192.168.77.1','192.168.78.1')   # USB and the J1's own network
+PANEL_CHANGED=threading.Event()
+def panel_conf():
+    c=load('panel.json',{})
+    return {'enabled':c.get('enabled',True) is not False,'lan':c.get('lan') is True}
+def panel_set(**kw):
+    c=panel_conf();c.update(kw);save('panel.json',c);PANEL_CHANGED.set()
+    log('Panel web: '+('activado' if c['enabled'] else 'desactivado')+(' (también en la red local)' if c['enabled'] and c['lan'] else ''))
+def lan_ips():
+    """The J1's addresses on the home network (Wi-Fi / cable), fixed or from DHCP."""
+    try:out=command(['ip','-4','-o','addr','show'])
+    except (RuntimeError,OSError,subprocess.SubprocessError):return []
+    return [ip for ip in re.findall(r'\binet (\d+\.\d+\.\d+\.\d+)/',out)
+            if ip not in PANEL_FIXED and not ip.startswith('127.') and ip!='10.66.0.1']
+def panel_allowed(local):
+    c=panel_conf()
+    return c['enabled'] and (local in PANEL_FIXED or (c['lan'] and local in lan_ips()))
+class PanelServer(http.server.ThreadingHTTPServer):
+    # one socket for every address (DHCP may change the home one); each
+    # connection is checked against the address it arrived on
+    daemon_threads=True
+    def verify_request(self,request,client_address):
+        try:return panel_allowed(request.getsockname()[0])
+        except OSError:return False
+def panel_serve():
+    srv=None
+    while True:
+        on=panel_conf()['enabled']
+        if on and not srv:
+            try:srv=PanelServer(('0.0.0.0',80),Handler);threading.Thread(target=srv.serve_forever,daemon=True).start()
+            except OSError:srv=None
+        elif srv and not on:srv.shutdown();srv.server_close();srv=None   # port 80 closed
+        PANEL_CHANGED.wait(3);PANEL_CHANGED.clear()
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version='J1-VPN'
     def log_message(self,*args):pass
@@ -725,7 +760,7 @@ def ui_home():
     s.label('DNS: '+RUNTIME['ddns'],'g' if RUNTIME['ddns'].startswith('Actualizado') else 'm')
     s.label('Red config: apagada' if (STATE/'ap-off').exists() else readrun('ap-name')+' · '+readrun('ap-password'),'m')
     for a,t in (('wifi','Wi-Fi'),('ap','Red de configuración'),('vpn','WireGuard'),('dns','Cloudflare DNS'),('usb','Cable USB'),
-                ('speed','Velocidad'),('res','Recursos'),('disp','Pantalla'),('logs:sys','Registros'),('sys','Sistema')):
+                ('speed','Velocidad'),('panel','Panel web'),('res','Recursos'),('disp','Pantalla'),('logs:sys','Registros'),('sys','Sistema')):
         s.tile('nav:'+a,t,a.split(':')[0])
     return s.small(BRAND,'m').small(REPO,'m')
 
@@ -792,6 +827,23 @@ def ui_ip(cls):
     s.field('ip','Dirección IP',conf.get('ip',''),'i').field('prefix','Prefijo (24 = 255.255.255.0)',conf.get('prefix','24'),'n')
     s.field('gw','Puerta de enlace',conf.get('router',''),'i').field('dns','DNS (separados por espacio)',conf.get('dns',''),'i')
     return s.button('ip.save:'+cls,'Guardar IP manual','p')
+
+def ui_panel(arg):
+    c=panel_conf();s=Screen('panel','Panel web',refresh=10)
+    s.toggle('panel.off' if c['enabled'] else 'panel.on','Panel web',c['enabled'])
+    if c['enabled']:
+        s.toggle('panel.lan:0' if c['lan'] else 'panel.lan:1','Acceso desde la red local',c['lan'])
+        s.label('Direcciones:')
+        s.small('Red del J1: http://192.168.78.1','g').small('USB: http://192.168.77.1','g')
+        if c['lan']:
+            ips=lan_ips()
+            for ip in ips:s.small('Red local: http://'+ip,'g')
+            if not ips:s.small('Red local: sin IP (conecta la Wi-Fi o el cable)','y')
+            s.small('En la red local el panel va sin cifrar (HTTP): úsalo solo en casa y no abras el puerto 80 en el router.','y')
+        s.small('Usuario admin; contraseña: la clave de la red de configuración.','m')
+    else:s.small('Puerto 80 cerrado. La pantalla sigue funcionando; sin panel no se descargan los .conf ni se gestiona el SSH.','m')
+    s.gap().label('IP del J1 en la red local:')
+    return s.button('nav:ip:wlan0','IP de la Wi-Fi (DHCP o fija)','i','ip').button('nav:ip:eth','IP del cable (DHCP o fija)','i','ip')
 
 def ui_vpn(arg):
     v=ensure_vpn_state();peers=wg_peers()
@@ -984,7 +1036,7 @@ def ui_power(arg):
 
 UI_SCREENS={'home':lambda a:ui_home(),'wifi':ui_wifi,'wifinet':ui_wifinet,'wifihidden':ui_wifihidden,'ap':ui_ap,
     'ip':ui_ip,'vpn':ui_vpn,'client':ui_client,'qr':ui_qr,'del':ui_del,'dns':ui_dns,'usb':ui_usb,'logs':ui_logs,
-    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz}
+    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz,'panel':ui_panel}
 
 def ui_action(a, f):
     """Runs a screen action; returns (next screen, message)."""
@@ -1013,6 +1065,10 @@ def ui_action(a, f):
         elif verb.startswith('dns6'):dns_settings(bool(cf.get('enabled')),cf.get('hostname',''),cf.get('zone_id',''),'',verb=='dns6.on')
         else:dns_settings(verb=='dns.on',cf.get('hostname',''),cf.get('zone_id',''),'')
         return 'dns','Cloudflare guardado'
+    if verb in ('panel.on','panel.off'):panel_set(enabled=verb=='panel.on');return 'panel','Panel web '+('activado' if verb=='panel.on' else 'desactivado')
+    if verb=='panel.lan':
+        if arg not in ('0','1'):raise ValueError('Opción no válida')
+        panel_set(lan=arg=='1');return 'panel','Acceso desde la red local '+('activado' if arg=='1' else 'desactivado')
     if verb=='tz.set':return 'tz','Zona horaria: '+tz_set(arg)
     if verb=='disp.set':
         t=int(arg) if arg.isdigit() else -1
@@ -1187,13 +1243,7 @@ def main():
     os.umask(0o077);STATE.mkdir(parents=True,exist_ok=True);RUN.mkdir(parents=True,exist_ok=True)
     ensure_vpn_state();apply_usb();threading.Thread(target=worker,daemon=True).start()
     threading.Thread(target=ui_serve,daemon=True).start()
-    for address in ['192.168.77.1','192.168.78.1']:
-        def serve(ip=address):
-            while True:
-                try:
-                    srv=http.server.ThreadingHTTPServer((ip,80),Handler);srv.daemon_threads=True;srv.serve_forever()
-                except OSError:time.sleep(3)
-        threading.Thread(target=serve,daemon=True).start()
+    threading.Thread(target=panel_serve,daemon=True).start()
     log('Web Wi-Fi / WireGuard disponible')
     while True:time.sleep(3600)
 if __name__=='__main__':main()
