@@ -3,6 +3,10 @@
  *   j1-camera qr    rear|front [seconds]   prints the first QR code seen
  *   j1-camera photo rear|front file.pgm    saves one 640x480 grey picture
  *
+ * While looking for a QR code, every frame also goes to PREVIEW for the screen:
+ * 240x320 grey, upright (the sensors are mounted at 90 and 270 degrees) and,
+ * for the front camera, mirrored like a selfie.
+ *
  * Exit status: 0 done, 1 no QR code before the time limit (or SIGTERM), 2 error.
  *
  * Rear: SR541 (5 MP, has its own MCU), I2C 0x28, 16-bit registers, MIPI 2 lanes
@@ -55,6 +59,9 @@ const char *zbar_symbol_get_data(const zbar_symbol_t *);
 #define Y800 0x30303859u   /* 'Y','8','0','0': 8-bit grey */
 
 #define TABLES "/var/lib/j1/camera.tables"
+#define PREVIEW "/run/j1-camera.preview"
+#define PW 240
+#define PH 320
 
 /* ---- sensor driver (/dev/sprd_sensor) ---- */
 typedef struct { uint16_t reg_addr, reg_value; uint32_t reg_bits; } SENSOR_REG_BITS_T;
@@ -191,6 +198,30 @@ static void phy_setup(volatile uint32_t *csi, volatile uint32_t *mm, const struc
 /* the Y plane, read out of uncached memory a word at a time */
 static void luma(const volatile uint32_t *p, uint8_t *y) { for (int i = 0; i < W * H / 4; i++) ((uint32_t *)y)[i] = p[i]; }
 
+/* half size, turned to portrait; written whole then renamed so the screen never reads half a frame */
+static void preview(const uint8_t *y, int rear) {
+	static uint8_t o[PW * PH];
+	for (int r = 0; r < PH; r++) for (int c = 0; c < PW; c++) {
+		/* rear, turned 90 degrees clockwise: screen row = sensor column, screen column =
+		 * sensor rows bottom up. Front, turned 270 and mirrored: columns right to left */
+		int sx = rear ? r * 2 : W - 2 - r * 2, sy = H - 2 - c * 2;
+		o[r * PW + c] = y[sy * W + sx];
+	}
+	/* dim rooms: stretch the levels between the 2% darkest and brightest points
+	 * (only the picture on the screen; the QR reader gets the frame as it is) */
+	unsigned hist[256] = {0}, lo = 0, hi = 255, n = 0;
+	for (int i = 0; i < PW * PH; i++) hist[o[i]]++;
+	while (lo < 255 && (n += hist[lo]) < PW * PH / 50) lo++;
+	for (n = 0; hi > 0 && (n += hist[hi]) < PW * PH / 50; ) hi--;
+	if (hi > lo + 8 && (lo > 0 || hi < 255))
+		for (int i = 0; i < PW * PH; i++) o[i] = o[i] <= lo ? 0 : o[i] >= hi ? 255 : (uint8_t)((o[i] - lo) * 255 / (hi - lo));
+	int fd = open(PREVIEW ".tmp", O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0) return;
+	int ok = write(fd, o, sizeof o) == (ssize_t)sizeof o;
+	close(fd);
+	if (ok) rename(PREVIEW ".tmp", PREVIEW);
+}
+
 static int find_qr(zbar_image_scanner_t *sc, uint8_t *y) {
 	zbar_image_t *im = zbar_image_create();
 	zbar_image_set_format(im, Y800);
@@ -320,7 +351,7 @@ int main(int argc, char **argv) {
 		}
 		const volatile uint32_t *p = (const volatile uint32_t *)(mem + (b.index % NBUF) * frame);
 		frames++;
-		if (qr && frames > 2) { luma(p, y); if (find_qr(sc, y)) { result = 0; break; } }
+		if (qr) { luma(p, y); preview(y, rear); if (frames > 2 && find_qr(sc, y)) { result = 0; break; } }
 		if (!qr && frames == want) {
 			luma(p, y);
 			FILE *o = fopen(argv[3], "wb");
@@ -333,6 +364,7 @@ int main(int argc, char **argv) {
 		if (write(vfd, &fr, sizeof fr) < 0) { fprintf(stderr, "j1-camera: frame release: %s\n", strerror(errno)); result = 2; break; }
 	}
 	alarm(0);
+	unlink(PREVIEW);
 
 	/* everything off again, PHY powered down as at boot */
 	ioctl(vfd, VIDIOC_STREAMOFF, &t);

@@ -753,6 +753,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 #  T id title back | R seconds | M text kind(o/e) | L text color | l small-text color
 #  B action text style(n/p/d/i) | S action text 0/1 | F name label value kind(t/p/n/i)
 #  Q row,row,... (QR, 1 = dark) | G (gap) | C action text icon (home tile, two per row)
+#  W camera (live picture from /run/j1-camera.preview, painted by the screen itself)
 #  P name column column color (table row, small print) | D action value min max (slider) | O idle-seconds | V brightness | K lock-screen 0/1
 LOGS = Path('/root/j1-logs')
 def cp437(s):
@@ -910,8 +911,8 @@ def ui_wifiscan(arg):
     with LOCK:q=dict(CAMQR)
     s=Screen('wifiscan','Escanear QR','nav:wifi',refresh=1 if q.get('running') else 0)
     if q.get('running'):
-        if q['cam']=='rear':s.label('Apunta la parte de atrás del J1 al código QR','y')
-        else:s.label('Pon la pantalla del J1 mirando al código QR','y')
+        s.small('Apunta la parte de atrás del J1 al código QR' if q['cam']=='rear' else 'Pon la pantalla del J1 mirando al código QR','y')
+        s.add('W',q['cam'])   # live camera picture (j1-camera writes it, j1-display paints it)
         s.small('A unos 20-30 cm y con buena luz. Se para sola en %d s.'%CAMQR_SECONDS,'m')
         return s.button('camqr.stop','Cancelar','d')
     if q.get('net'):

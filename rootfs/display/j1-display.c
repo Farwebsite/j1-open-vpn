@@ -204,6 +204,27 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 	(*rows)++;
 	int m = (SW - 2 * PAD) / (*cols + 8); return m > 8 ? 8 : m < 1 ? 1 : m;
 }
+/* camera preview (W): j1-camera writes each frame to PV_FILE, 240x320 grey,
+ * already upright; shown 300x400. While it is on screen only its area is
+ * painted again, about 8 times a second, without asking web.py */
+#define PV_FILE "/run/j1-camera.preview"
+#define PV_W 240
+#define PV_H 320
+#define PV_SHOW_W 300
+#define PV_SHOW_H 400
+static uint8_t pv[PV_W * PV_H];
+static int pv_ok;
+static struct timespec pv_time;
+/* 1 when there is a new frame (or the camera went away) */
+static int pv_load(void) {
+	struct stat st;
+	if (stat(PV_FILE, &st) || st.st_size != (off_t)sizeof pv) { int was = pv_ok; pv_ok = 0; return was; }
+	if (pv_ok && st.st_mtim.tv_sec == pv_time.tv_sec && st.st_mtim.tv_nsec == pv_time.tv_nsec) return 0;
+	int fd = open(PV_FILE, O_RDONLY); if (fd < 0) return 0;
+	pv_ok = read(fd, pv, sizeof pv) == (ssize_t)sizeof pv; close(fd);
+	pv_time = st.st_mtim;
+	return 1;
+}
 /* height of an element (tiles are laid out apart) */
 static int el_h(struct el *e, int w) {
 	switch (e->t) {
@@ -217,6 +238,7 @@ static int el_h(struct el *e, int w) {
 	case 'F': return 22 + 54 + 12;
 	case 'G': return 18;
 	case 'Q': { int c, r, m = qr_dims(e->a, &c, &r); return (r + 8) * m + 12; }
+	case 'W': return PV_SHOW_H + 12;
 	}
 	return 0;
 }
@@ -459,6 +481,23 @@ static uint32_t icon_color(const char *name) {
 	for (size_t i = 0; name && i < sizeof P / sizeof P[0]; i++) if (!strcmp(P[i].n, name)) return color(P[i].r, P[i].g, P[i].b);
 	return C_ACC;
 }
+static void draw_preview(int y) {
+	int x0 = (SW - PV_SHOW_W) / 2;
+	if (!pv_ok) {
+		rrect(x0, y, PV_SHOW_W, PV_SHOW_H, 16, C_ITM);
+		text_mid(SW / 2, y + PV_SHOW_H / 2 - 12, "Encendiendo la c\xa0mara...", 1, C_MUT);
+		return;
+	}
+	static uint32_t grey[256]; static int grey_ok;
+	if (!grey_ok) { for (int g = 0; g < 256; g++) grey[g] = color(g, g, g); grey_ok = 1; }
+	for (int r = 0; r < PV_SHOW_H; r++) {
+		int yy = y + r; if (yy < clip0 || yy >= clip1) continue;
+		const uint8_t *src = pv + (size_t)(r * PV_H / PV_SHOW_H) * PV_W;
+		uint32_t *d = buf + (size_t)yy * stride + x0;
+		for (int c = 0; c < PV_SHOW_W; c++) d[c] = grey[src[c * PV_W / PV_SHOW_W]];
+	}
+}
+static int preview_el(void) { for (int i = 0; i < nel; i++) if (els[i].t == 'W') return i; return -1; }
 static void render(void) {
 	if (locked) { render_lock(); return; }
 	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
@@ -545,6 +584,7 @@ static void render(void) {
 			else text(PAD + 12, y + 33, s, 2, C_WHITE);
 			if (editing) fill(PAD + 13 + tw(s, 2), y + 35, 2, 30, C_ACC);   /* cursor */
 			break; }
+		case 'W': draw_preview(y); break;
 		case 'Q': {
 			int c, r, m = qr_dims(e->a, &c, &r), qw = (c + 8) * m, x0 = (SW - qw) / 2;
 			rrect(x0, y, qw, (r + 8) * m, 12, C_WHITE);
@@ -1014,7 +1054,17 @@ int main(void) {
 			timeout = t - now() > 3600 ? 3600000 : (int)((t - now()) * 1000) + 5; if (timeout < 0) timeout = 0;
 		}
 		if (pwr_at) { int w = (int)((pwr_at + PWR_LONG - now()) * 1000) + 5; if (w < 0) w = 0; if (timeout < 0 || w < timeout) timeout = w; }
+		int pvi = shown && !dimmed && !locked ? preview_el() : -1;
+		if (pvi >= 0 && (timeout < 0 || timeout > 120)) timeout = 120;
 		poll(p, 2, timeout);
+		if (pvi >= 0 && pvi == preview_el() && !kb_open && !busy && !t_down && pv_load()) {
+			int y = TOP + els[pvi].y - scroll, y0 = y < TOP ? TOP : y, y1 = y + PV_SHOW_H;
+			if (y1 > TOP + view_h()) y1 = TOP + view_h();
+			buf = backbuf; clip0 = TOP; clip1 = TOP + view_h();
+			draw_preview(y);
+			clip0 = 0; clip1 = SH;
+			for (int r = y0; r < y1; r++) memcpy(mem + (size_t)r * f.line_length, (unsigned char *)backbuf + (size_t)r * f.line_length, f.line_length);
+		}
 		if (p[0].revents & POLLIN) key_events(1);
 		if (p[1].revents & POLLIN) touch_events(1);
 		if (pwr_at && now() >= pwr_at + PWR_LONG) power_held();
