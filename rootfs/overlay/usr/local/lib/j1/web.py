@@ -505,14 +505,19 @@ def panel_password_reset():
     log('Panel web: vuelve a usar la clave de la red de configuración')
 def lan_nets():
     """The J1's networks at home (Wi-Fi / cable), fixed or from DHCP."""
-    try:out=command(['ip','-4','-o','addr','show'])
+    try:out=command(['ip','-4','-o','addr','show']);routes=command(['ip','-4','route','show','scope','link'])
     except (RuntimeError,OSError,subprocess.SubprocessError):return []
     nets=[]
     for cidr in re.findall(r'\binet (\d+\.\d+\.\d+\.\d+/\d+)',out):
         n=ipaddress.ip_interface(cidr)
         if str(n.ip) not in PANEL_FIXED and not n.ip.is_loopback and n.ip not in VPN_NET:nets.append(n)
+    # a fixed IP is set as /32 plus a route for its subnet: take the subnet from the route
+    ips={str(n.ip) for n in nets}
+    for net,src in re.findall(r'^(\d+\.\d+\.\d+\.\d+/\d+) .*\bsrc (\d+\.\d+\.\d+\.\d+)',routes,re.M):
+        n=ipaddress.ip_interface(src+'/'+net.split('/')[1])
+        if src in ips and n not in nets:nets.append(n)
     return nets
-def lan_ips():return [str(n.ip) for n in lan_nets()]
+def lan_ips():return list(dict.fromkeys(str(n.ip) for n in lan_nets()))
 def panel_allowed(peer):
     c=panel_conf()
     try:p=ipaddress.ip_address(peer)

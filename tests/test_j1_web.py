@@ -150,6 +150,16 @@ class Tests(unittest.TestCase):
    self.assertEqual(ok(),[False]*5);self.assertFalse(app.panel_allowed('nonsense'))
    app.ui_request(b'a=panel.on&s=panel');self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':True})
   self.assertIn(b'C\tnav:panel\tPanel web\tpanel\n',app.ui_request(b'a=nav%3Ahome'))
+ def test_panel_lan_fixed_ip(self):
+  # a fixed IP is /32 on the interface; the subnet only shows in the routes
+  out={('ip','-4','-o','addr','show'):'1: lo    inet 127.0.0.1/8 scope host lo\n3: wlan0    inet 10.10.1.40/32 scope global wlan0\n'
+       '5: rndis0    inet 192.168.77.1/30 scope global rndis0\n6: wg0    inet 10.66.0.1/24 scope global wg0',
+       ('ip','-4','route','show','scope','link'):'10.10.1.0/24 dev wlan0 scope link src 10.10.1.40 metric 100\n'
+       '10.66.0.0/24 dev wg0 proto kernel scope link src 10.66.0.1\n192.168.77.0/30 dev rndis0 proto kernel scope link src 192.168.77.1'}
+  with patch.object(app,'command',lambda a,*x,**k:out[tuple(a)]):
+   self.assertEqual(app.lan_ips(),['10.10.1.40'])
+   app.panel_set(lan=True);self.assertTrue(app.panel_allowed('10.10.1.7'));self.assertFalse(app.panel_allowed('10.10.2.7'))
+   self.assertFalse(app.panel_allowed('10.66.0.3'))
  def test_panel_password(self):
   (app.STATE/'admin-password').write_text('ApKey12345\n')
   self.assertIsNone(app.panel_own_password());self.assertTrue(app.panel_password_ok('ApKey12345'));self.assertFalse(app.panel_password_ok('x'))
