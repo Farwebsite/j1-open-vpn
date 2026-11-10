@@ -253,14 +253,14 @@ def ap_enable(on):
 def wpa(*args): return command(['wpa_cli','-i','wlan0','-p','/run/wpa_supplicant',*args])
 
 def ap_password(pw):
-    # the AP passphrase is also the web password (user admin)
+    # the AP passphrase; also the panel password until the panel gets its own
     if not 8<=len(pw)<=63 or any(not 33<=ord(c)<=126 or c in '"\\' for c in pw):
         raise ValueError('Clave: 8 a 63 caracteres, sin espacios, comillas ni \\')
     with LOCK:
         conf=(STATE/'p2p.conf').read_text()
         new,n=re.subn(r'(?m)^(\s*psk=).*$',lambda m:m[1]+'"'+pw+'"',conf,count=1)
         if n!=1:raise RuntimeError('No se encontró la clave de la red de configuración')
-        atomic(STATE/'p2p.conf',new);atomic(STATE/'admin-password',pw+'\n')
+        atomic(STATE/'p2p.conf',new);atomic(STATE/'admin-password',pw+'\n');PANEL_AUTH_OK.clear()
         atomic(RUN/'ap-password','Clave: '+pw+'\n',0o644)
         # live: update the persistent group, then let j1-ap-ensure recreate it
         nid=next((r.split('\t')[0] for r in wpa('list_networks').splitlines()[1:] if 'P2P-PERSISTENT' in r),None)
@@ -427,10 +427,15 @@ def tz_section():
     opts=''.join('<option value=%d%s>%s</option>'%(i,' selected' if z==cur else '',esc(n)) for i,(n,z) in enumerate(TZ_ZONES))
     return ('<section id=hora><h2>Zona horaria</h2><p>'+esc(tz_name(cur))+' · ahora '+time.strftime('%H:%M')+'</p><form method=post>'+hidden()+
         '<input type=hidden name=action value=tz><select name=zone>'+opts+'</select><button>Guardar zona horaria</button></form></section>')
+def pw_section():
+    return ('<section id=clave><h2>Contraseña del panel</h2><p>'+('Propia.' if panel_own_password() else 'Ahora es la clave de la red de configuración.')+'</p><form method=post>'+hidden()+
+        '<input type=hidden name=action value=panelpw><label>Contraseña actual<input type=password name=current autocomplete=current-password></label>'
+        '<label>Nueva (8 a 64 caracteres)<input type=password name=pw autocomplete=new-password minlength=8 maxlength=64></label><label>Repítela<input type=password name=pw2 autocomplete=new-password></label>'
+        '<button>Cambiar contraseña</button><small>Después el navegador volverá a pedirla. Si la olvidas, cámbiala desde la pantalla del J1 (Panel web).</small></form></section>')
 def ssh_section():
     n=len(ssh_keys())
     state='Activo: %d clave%s autorizada%s.'%(n,'' if n==1 else 's','' if n==1 else 's') if n else 'Desactivado (ninguna clave autorizada).'
-    return lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
+    return pw_section()+lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshgen><button>Generar una clave y descargarla</button><small>Guarda el archivo descargado: es la llave para entrar y no se puede volver a descargar.</small></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshadd><label>O pega tu clave pública (id_ed25519.pub)<textarea name=key rows=3 maxlength=1000></textarea></label><button>Añadir clave pública</button></form>'
         +('<form method=post>'+hidden()+'<input type=hidden name=action value=sshoff><button class=danger>Desactivar SSH (borrar todas las claves)</button></form>' if n else '')+'</section>')
@@ -464,9 +469,29 @@ def panel_conf():
     c=load('panel.json',{})
     return {'enabled':c.get('enabled',True) is not False,'lan':c.get('lan') is True,'vpn':c.get('vpn') is True}
 def panel_set(**kw):
-    c=panel_conf();c.update(kw);save('panel.json',c);PANEL_CHANGED.set()
+    raw=load('panel.json',{});raw.update(kw);save('panel.json',raw);PANEL_CHANGED.set();c=panel_conf()
     extra=[n for n,k in (('red local','lan'),('VPN','vpn')) if c[k]]
     log('Panel web: '+('activado' if c['enabled'] else 'desactivado')+(' (también desde '+' y '.join(extra)+')' if c['enabled'] and extra else ''))
+# panel password: its own (salted PBKDF2 hash in panel.json) or, until one is
+# set, the key of the J1's network. Checked headers are remembered so each page
+# does not pay the hash again; any change forgets them.
+PANEL_AUTH_OK=set()
+def panel_own_password():
+    p=load('panel.json',{}).get('password')
+    return p if isinstance(p,dict) and 'salt' in p and 'hash' in p else None
+def panel_password_ok(pw):
+    p=panel_own_password()
+    if p:return hmac.compare_digest(pin_hash(pw,p['salt']),p['hash'])
+    try:return hmac.compare_digest(pw.encode(),(STATE/'admin-password').read_text().strip().encode())
+    except FileNotFoundError:return False
+def panel_password_set(pw,again):
+    if not 8<=len(pw)<=64 or any(not 32<=ord(c)<=126 for c in pw):raise ValueError('Contraseña: 8 a 64 caracteres sin acentos ni ñ')
+    if pw!=again:raise ValueError('Las dos contraseñas no coinciden')
+    salt=secrets.token_hex(16);raw=load('panel.json',{});raw['password']={'salt':salt,'hash':pin_hash(pw,salt)}
+    save('panel.json',raw);PANEL_AUTH_OK.clear();log('Contraseña del panel web cambiada')
+def panel_password_reset():
+    raw=load('panel.json',{});raw.pop('password',None);save('panel.json',raw);PANEL_AUTH_OK.clear()
+    log('Panel web: vuelve a usar la clave de la red de configuración')
 def lan_nets():
     """The J1's networks at home (Wi-Fi / cable), fixed or from DHCP."""
     try:out=command(['ip','-4','-o','addr','show'])
@@ -503,11 +528,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     server_version='J1-VPN'
     def log_message(self,*args):pass
     def auth(self):
-        try: password=(STATE/'admin-password').read_text().strip()
-        except FileNotFoundError:
+        if not panel_own_password() and not (STATE/'admin-password').exists():
             self.respond(b'Configuracion aun no disponible',503,'text/plain');return False
-        expected='Basic '+base64.b64encode(('admin:'+password).encode()).decode()
-        if hmac.compare_digest(self.headers.get('Authorization',''),expected):return True
+        h=self.headers.get('Authorization','');key=hashlib.sha256(h.encode()).digest()
+        if key in PANEL_AUTH_OK:return True
+        try:user,_,pw=base64.b64decode(h[6:],validate=True).decode('utf8').partition(':') if h.startswith('Basic ') else ('','','')
+        except (ValueError,UnicodeDecodeError):user=pw=''
+        if user=='admin' and panel_password_ok(pw):
+            if len(PANEL_AUTH_OK)>16:PANEL_AUTH_OK.clear()
+            PANEL_AUTH_OK.add(key);return True
         self.send_response(401);self.send_header('WWW-Authenticate','Basic realm="J1 VPN"');self.send_header('Content-Length','0');self.end_headers();return False
     def respond(self, body, code=200, content='text/html; charset=utf-8', filename=None):
         self.send_response(code);self.send_header('Content-Type',content);self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
@@ -546,6 +575,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 key=ssh_generate()
                 self.respond(key,content='application/octet-stream',filename='j1-open-vpn-ssh-key');return
             elif action=='sshadd':ssh_add(f.get('key',''));message='Clave añadida. Ya puedes entrar por USB: ssh root@192.168.77.1'
+            elif action=='panelpw':
+                if not panel_password_ok(f.get('current','')):raise ValueError('La contraseña actual no es correcta')
+                panel_password_set(f.get('pw',''),f.get('pw2',''));message='Contraseña del panel cambiada: el navegador te la volverá a pedir.'
             elif action=='lockunblock':pin_unblock();message='Pantalla desbloqueada: vuelve a aceptar el código.'
             elif action=='lockpinoff':pin_clear();message='Código de desbloqueo quitado.'
             elif action=='lock':display_save(lock=f.get('on')=='1');message='Pantalla de bloqueo '+('activada.' if display_lock() else 'desactivada.')
@@ -874,7 +906,7 @@ def ui_ap(arg):
     s.small('Equipos con dirección asignada: %d'%leases,'m').gap()
     s.button('nav:wifiqr:ap','QR para conectarse','i','qr')
     s.field('password','Nueva clave (8 a 63 caracteres)','','p').button('ap.pass','Cambiar clave','p')
-    return s.small('Es también la clave de la web (usuario admin). Los equipos conectados tendrán que volver a conectarse.','m')
+    return s.small(('El panel web tiene contraseña propia (Panel web). ' if panel_own_password() else 'Es también la contraseña del panel web mientras no le pongas una propia (Panel web). ')+'Los equipos conectados tendrán que volver a conectarse.','m')
 
 def ui_ip(cls):
     if cls not in IP_CLASSES:raise ValueError('Interfaz no válida')
@@ -915,8 +947,11 @@ def ui_panel(arg):
             if not ips:s.small('Red local: sin IP (conecta la Wi-Fi o el cable)','y')
             s.small('En la red local el panel va sin cifrar (HTTP): úsalo solo en casa y no abras el puerto 80 en el router.','y')
         if c['vpn']:s.small('VPN: http://10.66.0.1 (cifrado por el túnel, desde cualquier sitio)','g')
-        s.small('Usuario admin; contraseña: la clave de la red de configuración.','m')
     else:s.small('Puerto 80 cerrado. La pantalla sigue funcionando; sin panel no se descargan los .conf ni se gestiona el SSH.','m')
+    own=panel_own_password() is not None
+    s.gap().label('Contraseña del panel (usuario admin):').small('Propia (la de la red de configuración ya no vale)' if own else 'La misma clave de la red de configuración','g' if own else 'm')
+    s.field('pw','Nueva contraseña (8 a 64 caracteres)','','p').field('pw2','Repítela','','p').button('panel.pw','Cambiar contraseña del panel','p')
+    if own:s.button('panel.pwreset','Volver a usar la clave de la red','i')
     s.gap().label('IP del J1 en la red local:')
     return s.button('nav:ip:wlan0','IP de la Wi-Fi (DHCP o fija)','i','ip').button('nav:ip:eth','IP del cable (DHCP o fija)','i','ip')
 
@@ -1141,6 +1176,8 @@ def ui_action(a, f):
         else:dns_settings(verb=='dns.on',cf.get('hostname',''),cf.get('zone_id',''),'')
         return 'dns','Cloudflare guardado'
     if verb in ('panel.on','panel.off'):panel_set(enabled=verb=='panel.on');return 'panel','Panel web '+('activado' if verb=='panel.on' else 'desactivado')
+    if verb=='panel.pw':panel_password_set(f.get('pw',''),f.get('pw2',''));return 'panel','Contraseña del panel cambiada'
+    if verb=='panel.pwreset':panel_password_reset();return 'panel','El panel vuelve a usar la clave de la red'
     if verb in ('panel.lan','panel.vpn'):
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         k=verb[6:];panel_set(**{k:arg=='1'})

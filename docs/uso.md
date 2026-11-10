@@ -16,7 +16,7 @@
 Vistas del inicio:
 
 - **Wi-Fi:** encender/apagar el Wi-Fi cliente, buscar redes, red oculta, IP fija, QR de la red guardada.
-- **Red de configuración:** la red propia del J1 (`DIRECT-J1-VPN-XXXX`). Se puede apagar y cambiar su clave (que es también la clave del panel web). *QR para conectarse* muestra un código para entrar desde otro móvil.
+- **Red de configuración:** la red propia del J1 (`DIRECT-J1-VPN-XXXX`). Se puede apagar y cambiar su clave (que es también la del panel web mientras el panel no tenga contraseña propia). *QR para conectarse* muestra un código para entrar desde otro móvil.
 - **WireGuard:** puerto, dominio, UPnP, clientes (crear, ver última conexión y tráfico, **QR**, quitar).
 - **Cloudflare DNS:** DNS dinámico (ver abajo).
 - **Cable USB:** estado del adaptador de red, 5 V automáticos, IP del cable.
@@ -31,7 +31,7 @@ Con la pantalla apagada se borra la memoria de vídeo: un código QR no se queda
 
 ## Panel web
 
-Desde un dispositivo conectado a la red de configuración: **http://192.168.78.1**. Por USB desde el PC: **http://192.168.77.1** (el J1 da la IP al PC solo). Usuario `admin`, contraseña = clave de la red de configuración.
+Desde un dispositivo conectado a la red de configuración: **http://192.168.78.1**. Por USB desde el PC: **http://192.168.77.1** (el J1 da la IP al PC solo). Usuario `admin`. Contraseña: la clave de la red de configuración, salvo que le pongas una **propia** (pantalla *Panel web* → *Cambiar contraseña del panel*, o en el propio panel, sección *Contraseña del panel*, que pide la actual). La propia se guarda como hash (PBKDF2 con sal). Si la olvidas, cámbiala desde la pantalla del J1 o pulsa *Volver a usar la clave de la red*.
 
 Permite lo mismo que la pantalla y además **descargar el archivo `.conf`** de cada cliente para ordenadores.
 

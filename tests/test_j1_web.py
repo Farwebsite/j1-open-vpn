@@ -150,6 +150,17 @@ class Tests(unittest.TestCase):
    self.assertEqual(ok(),[False]*5);self.assertFalse(app.panel_allowed('nonsense'))
    app.ui_request(b'a=panel.on&s=panel');self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':True})
   self.assertIn(b'C\tnav:panel\tPanel web\tpanel\n',app.ui_request(b'a=nav%3Ahome'))
+ def test_panel_password(self):
+  (app.STATE/'admin-password').write_text('ApKey12345\n')
+  self.assertIsNone(app.panel_own_password());self.assertTrue(app.panel_password_ok('ApKey12345'));self.assertFalse(app.panel_password_ok('x'))
+  self.assertIn(b'\te\n',app.ui_request(b'a=panel.pw&s=panel&f_pw=short&f_pw2=short'))
+  self.assertIn(b'no coinciden',app.ui_request(b'a=panel.pw&s=panel&f_pw=Panel-Pass-1&f_pw2=Panel-Pass-2'))
+  out=app.ui_request(b'a=panel.pw&s=panel&f_pw=Panel-Pass-1&f_pw2=Panel-Pass-1');self.assertIn(b'Propia',out);self.assertIn(b'panel.pwreset',out)
+  self.assertTrue(app.panel_password_ok('Panel-Pass-1'));self.assertFalse(app.panel_password_ok('ApKey12345'))
+  self.assertNotIn('Panel-Pass-1',app.json.dumps(app.load('panel.json',{})))
+  app.ui_request(b'a=panel.vpn%3A1&s=panel');self.assertIsNotNone(app.panel_own_password())   # other settings keep it
+  self.assertIn('Propia',app.pw_section())
+  app.ui_request(b'a=panel.pwreset&s=panel');self.assertTrue(app.panel_password_ok('ApKey12345'));self.assertIsNone(app.panel_own_password())
  def test_lock_code(self):
   app.PIN_FAIL.update(n=0,until=0.0)
   self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=nav%3Adisp'))

@@ -122,7 +122,7 @@ En la pantalla del J1:
 
 Recomendado: en **Wi-Fi → IP de la Wi-Fi** fija la IP, para que no cambie y la redirección del router siga funcionando.
 
-También puedes hacerlo desde otro móvil u ordenador: conéctate a la red `DIRECT-J1-VPN-XXXX` con su clave y abre **http://192.168.78.1** (usuario `admin`, la misma clave).
+También puedes hacerlo desde otro móvil u ordenador: conéctate a la red `DIRECT-J1-VPN-XXXX` con su clave y abre **http://192.168.78.1** (usuario `admin`, la misma clave; luego puedes ponerle al panel una contraseña propia).
 
 ## 7. Abre el puerto en el router
 
