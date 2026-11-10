@@ -285,7 +285,7 @@ static void parse(int keep_dirty) {
 }
 
 /* ---- keyboard ---- */
-static int kb_open, kb_layer, kb_shift, kb_show; static struct el *kb_el; static char kb_buf[160];
+static int kb_open, kb_layer, kb_shift, kb_show, kb_was_dirty; static struct el *kb_el; static char kb_buf[160], kb_orig[160];
 static const char *KB[3][3] = {
 	{"qwertyuiop", "asdfghjkl\xa4", "zxcvbnm"},
 	{"1234567890", "@#$%&*-+()", "!\"':;/?"},
@@ -293,7 +293,7 @@ static const char *KB[3][3] = {
 };
 #define KH 70
 #define KBY (SH - 4 * KH)
-#define PVH 84          /* preview bar above the keys */
+#define PVH 52          /* bar above the keys: field name, ver, X */
 static int view_h(void) { return (kb_open ? KBY - PVH : SH) - TOP; }
 
 struct key { int x, y, w, h; int code; const char *label; };
@@ -339,18 +339,10 @@ static void draw_keyboard(void) {
 	clip0 = 0; clip1 = SH;
 	fill(0, KBY - PVH, SW, SH - KBY + PVH, C_BAR);
 	fill(0, KBY - PVH, SW, 1, C_LINE);
-	text(PAD, KBY - PVH + 4, kb_el && kb_el->b ? kb_el->b : "", 1, C_MUT);
-	char shown_txt[160]; int len = (int)strlen(kb_buf);
-	if (kb_el && secret(kb_el) && !kb_show) { memset(shown_txt, '*', len); shown_txt[len] = 0; }
-	else snprintf(shown_txt, sizeof shown_txt, "%s", kb_buf);
-	/* the end of the text (where the cursor is) stays visible */
-	int room = SW - 150 - PAD - 16; const char *t = shown_txt;
-	while (*t && tw(t, 2) > room) t++;
-	rrect(PAD - 4, KBY - PVH + 28, SW - 150, 48, 10, C_FLD);
-	text(PAD + 4, KBY - PVH + 36, t, 2, C_WHITE);
-	fill(PAD + 6 + tw(t, 2), KBY - PVH + 38, 2, 30, C_ACC);   /* cursor */
+	/* the text goes into the field itself; this bar only says which one */
+	text_fit(PAD, KBY - PVH + 16, kb_el && kb_el->b ? kb_el->b : "", SW - 150 - PAD, 1, C_MUT);
 	for (int i = 0; i < n; i++) {
-		if (k[i].code == K_CANCEL || k[i].code == K_SHOW) { text_mid(k[i].x + k[i].w / 2, k[i].y + 26, k[i].label, 2, k[i].code == K_CANCEL ? C_RED : C_ACC); continue; }
+		if (k[i].code == K_CANCEL || k[i].code == K_SHOW) { text_mid(k[i].x + k[i].w / 2, k[i].y + (k[i].h - 32) / 2, k[i].label, 2, k[i].code == K_CANCEL ? C_RED : C_ACC); continue; }
 		uint32_t bg = i == kb_down ? C_DOWN : (k[i].code >= 256 ? C_KEYS : C_KEY);
 		if (k[i].code == K_OK) bg = i == kb_down ? C_DOWN : C_ACC;
 		if (k[i].code == K_SHIFT && kb_shift) bg = C_ACC;
@@ -529,12 +521,16 @@ static void render(void) {
 			break; }
 		case 'F': {
 			text(PAD + 4, y, e->b ? e->b : "", 1, C_MUT);
-			rrect(PAD, y + 22, w, 54, 12, e->dirty ? C_YEL : i == pressed ? C_ACC : C_KEYS);
+			int editing = kb_open && e == kb_el;
+			rrect(PAD, y + 22, w, 54, 12, editing || i == pressed ? C_ACC : e->dirty ? C_YEL : C_KEYS);
 			rrect(PAD + 2, y + 24, w - 4, 50, 10, C_FLD);
 			char tmp[160]; const char *s = e->val; int n = (int)strlen(s);
-			if (secret(e)) { memset(tmp, '*', n); tmp[n] = 0; s = tmp; }
-			if (!n) text(PAD + 12, y + 33, "Tocar para escribir", 2, C_MUT);
-			else { while (*s && tw(s, 2) > w - 24) s++; text(PAD + 12, y + 33, s, 2, C_WHITE); }
+			if (secret(e) && !(editing && kb_show)) { memset(tmp, '*', n); tmp[n] = 0; s = tmp; }
+			/* the end (where the cursor is) stays visible */
+			while (*s && tw(s, 2) > w - 30) s++;
+			if (!n && !editing) text(PAD + 12, y + 33, "Tocar para escribir", 2, C_MUT);
+			else text(PAD + 12, y + 33, s, 2, C_WHITE);
+			if (editing) fill(PAD + 13 + tw(s, 2), y + 35, 2, 30, C_ACC);   /* cursor */
 			break; }
 		case 'Q': {
 			int c, r, m = qr_dims(e->a, &c, &r), qw = (c + 8) * m, x0 = (SW - qw) / 2;
@@ -748,8 +744,10 @@ static int kb_hit(int x, int y) {
 static void kb_press(int i) {
 	struct key k[64]; int n = keys(k); if (i < 0 || i >= n) return;
 	int c = k[i].code, len = (int)strlen(kb_buf);
-	if (c == K_OK) { snprintf(kb_el->val, sizeof kb_el->val, "%s", kb_buf); kb_el->dirty = 1; kb_open = 0; clamp_scroll(); }
-	else if (c == K_CANCEL) { kb_open = 0; clamp_scroll(); }
+	if (c == K_OK) { kb_open = 0; clamp_scroll(); }   /* the field already has the text */
+	else if (c == K_CANCEL) {   /* X: undo what was typed in this field */
+		snprintf(kb_el->val, sizeof kb_el->val, "%s", kb_orig); kb_el->dirty = kb_was_dirty; kb_open = 0; clamp_scroll();
+	}
 	else if (c == K_SHOW) kb_show = !kb_show;
 	else if (c == K_BS) { if (len) kb_buf[len - 1] = 0; }
 	else if (c == K_SHIFT) kb_shift = !kb_shift;
@@ -759,12 +757,14 @@ static void kb_press(int i) {
 		kb_buf[len] = (char)(c == K_SPACE ? ' ' : c); kb_buf[len + 1] = 0;
 		if (kb_layer == 0) kb_shift = 0;
 	}
+	/* every key goes straight into the field: nothing to confirm */
+	if (kb_open && (c == K_BS || c < 256 || c == K_SPACE) && strcmp(kb_el->val, kb_buf)) { snprintf(kb_el->val, sizeof kb_el->val, "%s", kb_buf); kb_el->dirty = 1; }
 	poke();
 }
 static void open_kb(struct el *e) {
 	kb_el = e; kb_open = 1; kb_show = 0; kb_shift = 0;
 	kb_layer = (e->d && (*e->d == 'n' || *e->d == 'i' || *e->d == 'q')) ? 1 : 0;
-	snprintf(kb_buf, sizeof kb_buf, "%s", e->val);
+	snprintf(kb_buf, sizeof kb_buf, "%s", e->val); snprintf(kb_orig, sizeof kb_orig, "%s", e->val); kb_was_dirty = e->dirty;
 	/* keep the field visible above the keyboard */
 	int top = e->y, bottom = e->y + e->h;
 	if (bottom - scroll > view_h()) scroll = bottom - view_h();
