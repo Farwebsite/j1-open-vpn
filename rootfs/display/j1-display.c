@@ -197,6 +197,8 @@ static void set_deadline(void), set_bright(void);
 static int dimmed, bright = 143;   /* backlight 0-255 from web.py */
 static char resp[131072], screen_id[128] = "home", back[128], title[128];
 static int busy, shown = 1, wakes;
+/* lock screen (K line from web.py): set when the screen goes off, a swipe opens it */
+static int lock_on, locked, lock_drag, lock_x;
 
 static uint32_t tcolor(const char *c) {
 	switch (c ? *c : 'n') { case 'g': return C_GRN; case 'y': return C_YEL; case 'r': return C_RED; case 'm': return C_MUT; default: return C_TXT; }
@@ -262,6 +264,7 @@ static void parse(int keep_dirty) {
 			if (v < 13 || v > 255) v = 143;
 			if (v != bright) { bright = v; if (shown && !dimmed) set_bright(); }
 		}
+		else if (fld[0][0] == 'K') { lock_on = fld[1] && *fld[1] == '1'; if (!lock_on) locked = 0; }
 		else if (fld[0][0] && (fld[1] || fld[0][0] == 'G')) {
 			struct el *e = &els[nel++]; memset(e, 0, sizeof *e);
 			e->t = fld[0][0]; e->a = fld[1] ? fld[1] : (char *)""; e->b = fld[2]; e->c = fld[3]; e->d = fld[4];
@@ -365,7 +368,32 @@ static void tz_follow(void) {
 	if (fgets(tz, sizeof tz, f)) { tz[strcspn(tz, "\n")] = 0; if (*tz) { setenv("TZ", tz, 1); tzset(); } }
 	fclose(f);
 }
+/* lock screen: drawn here; web.py is not asked anything until it is unlocked */
+#define LK_H 84         /* slide track */
+#define LK_K 76         /* knob */
+static int lock_y(void) { return SH - 200; }
+static int lock_range(void) { return SW - 2 * PAD - 8 - LK_K; }
+static void render_lock(void) {
+	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
+	char clock[16], date[16], bat[8] = "", line[40]; time_t t = time(NULL);
+	tz_follow();
+	strftime(clock, sizeof clock, "%H:%M", localtime(&t));
+	strftime(date, sizeof date, "%d/%m/%Y", localtime(&t));
+	text((SW - 5 * 56) / 2, SH / 5, clock, 7, C_WHITE);
+	text((SW - (int)strlen(date) * 16) / 2, SH / 5 + 130, date, 2, C_MUT);
+	FILE *in = fopen("/sys/class/power_supply/battery/capacity", "r");
+	if (in) { if (fgets(bat, sizeof bat, in)) bat[strcspn(bat, "\n")] = 0; fclose(in); }
+	if (bat[0]) { snprintf(line, sizeof line, "Bater\xa1" "a %d%%", atoi(bat)); text((SW - (int)strlen(line) * 16) / 2, SH / 5 + 170, line, 2, C_MUT); }
+	int y = lock_y(), x0 = PAD + 4, kx = x0 + lock_x;
+	rrect(PAD, y, SW - 2 * PAD, LK_H, LK_H / 2, C_ITM);
+	if (lock_x > 0) rrect(x0, y + 4, lock_x + LK_K, LK_K, LK_K / 2, C_ACC);
+	else textwh(x0 + LK_K + (lock_range() - 24 * 12) / 2, y + 30, "Desliza para desbloquear", 12, 24, C_MUT);
+	rrect(kx, y + 4, LK_K, LK_K, LK_K / 2, C_WHITE);
+	text(kx + LK_K / 2 - 8, y + 4 + LK_K / 2 - 16, ">", 2, C_BLACK);
+	present();
+}
 static void render(void) {
+	if (locked) { render_lock(); return; }
 	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
 	clip0 = TOP; clip1 = TOP + view_h();
 	int w = SW - 2 * PAD;
@@ -551,15 +579,16 @@ static void light(int on) {
 	shown = on; dimmed = 0; status();
 	if (!on) {  /* nothing private stays in video memory */
 		kb_open = 0; memset(mem, 0, f.smem_len);
+		if (lock_on) { locked = 1; lock_drag = lock_x = 0; }
 	}
 }
 static double last_touch;
 /* idle_s from web.py: 0 = always on; the keyboard gets at least 2 min.
  * The chosen time is when the screen goes off; its last third (10 s at most)
  * it is dimmed but still usable. deadline = start of the dimmed part. */
-static int idle_eff(void) { return kb_open && idle_s < 120 ? 120 : idle_s; }
+static int idle_eff(void) { return locked ? 10 : kb_open && idle_s < 120 ? 120 : idle_s; }   /* lock screen: 10 s */
 static int dim_len(void) { int d = idle_eff() / 3; return d > 10 ? 10 : d < 3 ? 3 : d; }
-static void set_deadline(void) { deadline = idle_s ? last_touch + idle_eff() - dim_len() : 1e12; }
+static void set_deadline(void) { deadline = idle_s || locked ? last_touch + idle_eff() - dim_len() : 1e12; }
 static void poke(void) {
 	if (dimmed) { set_bright(); dimmed = 0; }
 	last_touch = now();
@@ -568,9 +597,13 @@ static void poke(void) {
 /* nobody looking: status every 30 s at most */
 static int refresh_every(void) { return refresh_s > 0 && refresh_s < 30 && now() - last_touch > 60 ? 30 : refresh_s; }
 /* back where it was, except screens that show keys (QR) */
-static void wake(void) {
+static void resume(void) {
 	char nav[160]; snprintf(nav, sizeof nav, "nav:%s", strncmp(screen_id, "qr", 2) && strncmp(screen_id, "wifiqr", 6) && strcmp(screen_id, "power") ? screen_id : "home");
-	wakes++; light(1); poke(); send_action(nav, 0);
+	send_action(nav, 0);
+}
+static void wake(void) {
+	wakes++; light(1); poke();
+	if (locked) render(); else resume();
 }
 
 /* ---- input ---- */
@@ -637,6 +670,8 @@ static void touch_down(int x, int y) {
 	if (debug) fprintf(stderr, "%.3f dedo %d,%d%s\n", now(), x, y, shown ? "" : " (despierta)");
 	if (!shown) { ignore = 1; wake(); return; }
 	poke(); t_x0 = x; t_y0 = y; t_scroll0 = scroll; dragging = 0; t_maxd = 0; t_time0 = now();
+	/* locked: only a drag that starts on the knob counts */
+	if (locked) { lock_drag = y > lock_y() - 30 && y < lock_y() + LK_H + 30 && x < PAD + 4 + LK_K + 40; lock_x = 0; return; }
 	if (kb_open && y >= KBY - PVH) { kb_down = kb_hit(x, y); pressed = t_el = -1; }
 	else pressed = t_el = hit(x, y);
 	if (sliding()) { pressed = -1; last_drag_render = 0; slide(x); return; }
@@ -645,6 +680,12 @@ static void touch_down(int x, int y) {
 static void touch_move(int x, int y) {
 	int d = abs(y - t_y0) > abs(x - t_x0) ? abs(y - t_y0) : abs(x - t_x0);
 	if (d > t_maxd) t_maxd = d;
+	if (locked) {
+		if (!lock_drag) return;
+		lock_x = x - t_x0; if (lock_x < 0) lock_x = 0; if (lock_x > lock_range()) lock_x = lock_range();
+		if (now() - last_drag_render > 0.04) { render(); last_drag_render = now(); }
+		return;
+	}
 	if (kb_open && t_y0 >= KBY - PVH) return;
 	if (sliding()) { slide(x); return; }
 	if (!dragging && abs(y - t_y0) > 32 && content_h > view_h()) { dragging = 1; pressed = -1; }
@@ -656,6 +697,13 @@ static void touch_move(int x, int y) {
 static void touch_up(int x, int y) {
 	double dur = now() - t_time0;
 	if (ignore) { ignore = 0; if (debug) fprintf(stderr, "%.3f ignorado (despertar o pendiente)\n", now()); return; }
+	if (locked) {   /* knob almost at the end: unlocked; otherwise it goes back */
+		int open = lock_drag && lock_x >= lock_range() * 9 / 10;
+		if (debug) fprintf(stderr, "%.3f bloqueo: arrastre %d de %d%s\n", now(), lock_x, lock_range(), open ? " -> desbloqueada" : "");
+		lock_drag = lock_x = 0;
+		if (open) { locked = 0; resume(); } else render();
+		return;
+	}
 	if (kb_open && t_y0 >= KBY - PVH) {
 		if (kb_down >= 0) kb_press(kb_down);
 		kb_down = -1; render(); return;
@@ -702,6 +750,7 @@ static void power_held(void) {
 	if (ioctl(evkey, EVIOCGKEY(sizeof keys), keys) >= 0 && !(keys[KEY_POWER / 8] & (1 << (KEY_POWER % 8)))) return;
 	pwr_woke = 1;   /* the release must not turn the menu off */
 	if (!shown) light(1);
+	locked = 0;   /* holding Power is deliberate: the menu opens even when locked */
 	kb_open = 0; poke(); send_action("nav:power", 0);
 }
 /* hardware keys: Home, Back, Recents = resources, volume scrolls */
@@ -709,6 +758,7 @@ static void key(int c) {
 	if (debug) fprintf(stderr, "%.3f tecla %d\n", now(), c);
 	if (!shown) { wake(); return; }
 	poke();
+	if (locked) return;
 	if (c == KEY_VOLUMEUP) { scroll -= 300; clamp_scroll(); render(); }
 	else if (c == KEY_VOLUMEDOWN) { scroll += 300; clamp_scroll(); render(); }
 	else if (c == KEY_HOME) { kb_open = 0; send_action("nav:home", 0); }
@@ -820,6 +870,6 @@ int main(void) {
 			if (debug) fprintf(stderr, "%.3f atenuada\n", now());
 		}
 		if (dimmed && now() >= dim_until && !t_down) { light(0); continue; }
-		if (refresh_every() > 0 && !kb_open && !t_down && now() >= last_req + refresh_every()) { char nav[160]; snprintf(nav, sizeof nav, "nav:%s", screen_id); send_action(nav, 1); }
+		if (refresh_every() > 0 && !kb_open && !locked && !t_down && now() >= last_req + refresh_every()) { char nav[160]; snprintf(nav, sizeof nav, "nav:%s", screen_id); send_action(nav, 1); }
 	}
 }

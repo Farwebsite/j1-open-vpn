@@ -5,6 +5,7 @@
 | Acción | Cómo |
 |---|---|
 | Encender la pantalla | Tocarla o pulsar cualquier botón |
+| Desbloquear | Arrastrar el círculo de *Desliza para desbloquear* hasta el final (con la pantalla de bloqueo activada) |
 | Apagarla | Botón de encendido (pulsación corta) o sola al pasar el tiempo elegido |
 | Apagar o reiniciar el J1 | Mantener el botón de encendido 1,5 s → *Apagar* / *Reiniciar* |
 | Desplazar | Arrastrar, o Volumen +/− |
@@ -19,7 +20,8 @@ Vistas del inicio:
 - **Cloudflare DNS:** DNS dinámico (ver abajo).
 - **Cable USB:** estado del adaptador de red, 5 V automáticos, IP del cable.
 - **Recursos:** CPU total y por proceso, RAM, disco, tráfico y temperatura.
-- **Pantalla:** brillo (deslizador) y tiempo de apagado. En los últimos segundos se atenúa; un toque la recupera.
+- **Pantalla:** brillo (deslizador), pantalla de bloqueo y tiempo de apagado. En los últimos segundos se atenúa; un toque la recupera.
+- **Pantalla de bloqueo** (activada de serie; también se cambia en el panel web, sección *Pantalla de bloqueo*): cuando la pantalla se apaga, un toque o un botón solo muestran la hora y la batería, y hay que deslizar el círculo hasta el final para usarla. Así una mano apoyada encima no pulsa nada. Sin desbloquear vuelve a apagarse a los 10 s. Mantener el botón de encendido abre el menú de apagado igualmente.
 - **Registros:** sistema, red, VPN y kernel.
 - **Sistema:** encendido, carga, RAM, **zona horaria**, **prueba de velocidad**, reiniciar y apagar.
 

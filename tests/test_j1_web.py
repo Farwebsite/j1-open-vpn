@@ -132,6 +132,14 @@ class Tests(unittest.TestCase):
   self.assertIn(b'\nV\t143\n',out);out=app.ui_request(b'a=disp.bright%3A255&s=disp')
   self.assertIn(b'\nV\t255\n',out);self.assertIn(b'\nO\t0\n',out);self.assertIn(b'\nD\tdisp.bright\t255\t15\t255\n',out)
   self.assertIn(b'\te\n',app.ui_request(b'a=disp.bright%3A7&s=disp'));self.assertEqual(app.display_brightness(),255)
+ def test_lock_screen(self):
+  out=app.ui_request(b'a=nav%3Adisp&s=home');self.assertTrue(app.display_lock());self.assertIn(b'\nK\t1\n',out)
+  self.assertIn(b'\nS\tdisp.lock:0\tPantalla de bloqueo\t1\n',out)
+  out=app.ui_request(b'a=disp.lock%3A0&s=disp');self.assertIn(b'\nK\t0\n',out);self.assertFalse(app.display_lock())
+  self.assertIn(b'\te\n',app.ui_request(b'a=disp.lock%3A7&s=disp'));self.assertFalse(app.display_lock())
+  app.display_save(timeout=15);self.assertFalse(app.display_lock());self.assertEqual(app.display_timeout(),15)
+  self.assertIn('value=1><button>Activar',app.lock_section())
+  app.display_save(lock=True);self.assertIn(b'\nK\t1\n',app.ui_request(b'a=nav%3Ahome&s=home'))
 
  def test_resources_screen_measures_between_visits(self):
   app.RES_PREV.clear();first=app.ui_request(b'a=nav%3Ares');self.assertIn(b'Midiendo',first)

@@ -416,6 +416,10 @@ def ssh_disable():
         try:(STATE/'authorized_keys').unlink()
         except FileNotFoundError:pass
     log('SSH por USB desactivado')
+def lock_section():
+    on=display_lock()
+    return ('<section id=pantalla><h2>Pantalla de bloqueo</h2><p>'+('Activada' if on else 'Desactivada')+'</p><p class=muted>Activada: cuando la pantalla del J1 se apaga, tocarla solo enciende el reloj y hay que deslizar para usarla, así no se pulsa nada sin querer.</p><form method=post>'+hidden()+
+        '<input type=hidden name=action value=lock><input type=hidden name=on value='+('0' if on else '1')+'><button>'+('Desactivar' if on else 'Activar')+' pantalla de bloqueo</button></form></section>')
 def tz_section():
     cur=tz_get()
     opts=''.join('<option value=%d%s>%s</option>'%(i,' selected' if z==cur else '',esc(n)) for i,(n,z) in enumerate(TZ_ZONES))
@@ -424,7 +428,7 @@ def tz_section():
 def ssh_section():
     n=len(ssh_keys())
     state='Activo: %d clave%s autorizada%s.'%(n,'' if n==1 else 's','' if n==1 else 's') if n else 'Desactivado (ninguna clave autorizada).'
-    return tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
+    return lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshgen><button>Generar una clave y descargarla</button><small>Guarda el archivo descargado: es la llave para entrar y no se puede volver a descargar.</small></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshadd><label>O pega tu clave pública (id_ed25519.pub)<textarea name=key rows=3 maxlength=1000></textarea></label><button>Añadir clave pública</button></form>'
         +('<form method=post>'+hidden()+'<input type=hidden name=action value=sshoff><button class=danger>Desactivar SSH (borrar todas las claves)</button></form>' if n else '')+'</section>')
@@ -434,7 +438,7 @@ def page(message=''):
     v=ensure_vpn_state();cf=load('cloudflare.json',{})
     try:wifi=(RUN/'wifi-summary').read_text().strip()
     except FileNotFoundError:wifi='Sin configurar'
-    out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>J1 VPN</title><style>'+CSS+'</style><h1>J1 · Servidor VPN</h1><nav><a href="#wifi">Wi-Fi</a><a href="#usb">Cable</a><a href="#vpn">WireGuard</a><a href="#dns">Cloudflare</a><a href="#hora">Hora</a><a href="#ssh">SSH</a></nav>']
+    out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>J1 VPN</title><style>'+CSS+'</style><h1>J1 · Servidor VPN</h1><nav><a href="#wifi">Wi-Fi</a><a href="#usb">Cable</a><a href="#vpn">WireGuard</a><a href="#dns">Cloudflare</a><a href="#pantalla">Pantalla</a><a href="#hora">Hora</a><a href="#ssh">SSH</a></nav>']
     if message:out.append('<p class=notice role=status>'+esc(message)+'</p>')
     out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
@@ -494,6 +498,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 key=ssh_generate()
                 self.respond(key,content='application/octet-stream',filename='j1-open-vpn-ssh-key');return
             elif action=='sshadd':ssh_add(f.get('key',''));message='Clave añadida. Ya puedes entrar por USB: ssh root@192.168.77.1'
+            elif action=='lock':display_save(lock=f.get('on')=='1');message='Pantalla de bloqueo '+('activada.' if display_lock() else 'desactivada.')
             elif action=='tz':message='Zona horaria: '+tz_set(f.get('zone',''))
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
             elif action=='dns':
@@ -649,11 +654,17 @@ BRIGHT_MIN=15
 def display_brightness():
     b=load('display.json',{}).get('brightness',143)
     return b if type(b) is int and BRIGHT_MIN<=b<=255 else 143
+# lock screen: once the screen goes off, a touch only shows the clock until
+# the knob is slid across (on by default)
+def display_lock():
+    return load('display.json',{}).get('lock',True) is not False
 def display_save(**kw):
-    conf={'timeout':display_timeout(),'brightness':display_brightness()};conf.update(kw);save('display.json',conf)
+    conf={'timeout':display_timeout(),'brightness':display_brightness(),'lock':display_lock()};conf.update(kw);save('display.json',conf)
 
 def ui_disp(arg):
     s=Screen('disp','Pantalla').label('Brillo:').slider('disp.bright',display_brightness(),BRIGHT_MIN,255)
+    lk=display_lock();s.toggle('disp.lock:0' if lk else 'disp.lock:1','Pantalla de bloqueo',lk)
+    s.small('Al apagarse, un toque solo enciende el reloj: hay que deslizar para usarla. Evita pulsaciones sin querer.','m')
     cur=display_timeout();s.gap().label('Apagar la pantalla tras:')
     for t,n in DISPLAY_TIMES:s.button('disp.set:%d'%t,('> ' if t==cur else '')+n,'p' if t==cur else 'i')
     s.small('Se apaga al acabar el tiempo elegido. Los últimos segundos se atenúa: un toque ahí la usa directamente. Apagada, el primer toque solo la enciende.','m')
@@ -1004,6 +1015,9 @@ def ui_action(a, f):
         if t not in dict(DISPLAY_TIMES):raise ValueError('Tiempo no válido')
         display_save(timeout=t);return 'disp','Guardado: '+dict(DISPLAY_TIMES)[t]
     if verb=='speed.run':speed_start();return 'speed',None
+    if verb=='disp.lock':
+        if arg not in ('0','1'):raise ValueError('Opción no válida')
+        display_save(lock=arg=='1');return 'disp','Pantalla de bloqueo '+('activada' if arg=='1' else 'desactivada')
     if verb=='disp.bright':
         b=int(arg) if arg.isdigit() else -1
         if not BRIGHT_MIN<=b<=255:raise ValueError('Brillo no válido')
@@ -1032,6 +1046,7 @@ def ui_request(raw):
     except (ValueError,RuntimeError) as e:s=ui_home();msg,kind=str(e),'e'
     if msg:s.msg(msg,kind)
     s.rows.insert(1,['O',str(display_timeout())]);s.rows.insert(1,['V',str(display_brightness())])
+    s.rows.insert(1,['K','1' if display_lock() else '0'])
     return s.encode()
 
 class UIHandler(socketserver.StreamRequestHandler):
