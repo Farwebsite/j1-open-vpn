@@ -168,7 +168,9 @@ struct el { char t, *a, *b, *c, *d; int y, h, dirty, col, pg; char key[64], val[
 static int secret(const struct el *e) { return e->d && (*e->d == 'p' || *e->d == 'q'); }
 /* home tiles (C): two per row */
 #define TGAP 12
-#define TILE_H 136
+#define TILE_H 136      /* tallest; shorter when more status lines are above */
+#define TILE_MIN 104
+static int tile_h = TILE_H;
 static int tile_w(void) { return (SW - 2 * PAD - TGAP) / 2; }
 /* the tiles go in pages swiped sideways; page_dx = finger offset while dragging */
 #define DOTS_H 26
@@ -202,37 +204,46 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 	(*rows)++;
 	int m = (SW - 2 * PAD) / (*cols + 8); return m > 8 ? 8 : m < 1 ? 1 : m;
 }
+/* height of an element (tiles are laid out apart) */
+static int el_h(struct el *e, int w) {
+	switch (e->t) {
+	case 'M': return wrap(e->a, 0, 0, w - 16, 2, 0, 0) + 20;
+	case 'L': { char k = e->b ? *e->b : 'n'; int dot = k == 'g' || k == 'y' || k == 'r';   /* same width as when drawn */
+		return wrap(e->a, 0, 0, dot ? w - 26 : w, 2, 0, 0) + 6; }
+	case 'l': return wrap(e->a, 0, 0, w, 1, 0, 0) + 4;
+	case 'P': return 26;
+	case 'B': return (e->c && *e->c == 'i') ? 66 : 72;
+	case 'S': case 'D': return 72;
+	case 'F': return 22 + 54 + 12;
+	case 'G': return 18;
+	case 'Q': { int c, r, m = qr_dims(e->a, &c, &r); return (r + 8) * m + 12; }
+	}
+	return 0;
+}
 static void layout(void) {
 	int y = 8, w = SW - 2 * PAD;
 	npages = 1; tiles_h = 0;
 	for (int i = 0; i < nel; i++) {
 		struct el *e = &els[i]; e->y = y; e->h = 0; e->col = e->pg = 0;
-		if (e->t == 'C') {   /* a run of tiles: as many rows as fit below, the rest on more pages */
+		if (e->t == 'C') {   /* a run of tiles: the home screen never scrolls, so they fit */
 			int n = 0; while (i + n < nel && els[i + n].t == 'C') n++;
-			int rows = (SH - TOP - y - DOTS_H - 8) / (TILE_H + TGAP); if (rows < 1) rows = 1;
+			/* what comes after the tiles (footer) must fit too; 3 rows, shorter tiles if needed */
+			int after = 0; for (int k = i + n; k < nel; k++) after += el_h(&els[k], w);
+			int avail = SH - TOP - y - after - 24 - DOTS_H, rows = 3;
+			tile_h = avail / 3 - TGAP; if (tile_h > TILE_H) tile_h = TILE_H;
+			if (tile_h < TILE_MIN) { tile_h = TILE_MIN; rows = avail / (tile_h + TGAP); if (rows < 1) rows = 1; }
 			npages = (n + 2 * rows - 1) / (2 * rows);
 			if (npages == 1) rows = (n + 1) / 2;
 			for (int k = 0; k < n; k++) {
 				struct el *t = &els[i + k];
-				t->pg = k / (2 * rows); t->col = k % 2; t->y = y + (k % (2 * rows)) / 2 * (TILE_H + TGAP); t->h = TILE_H + TGAP;
+				t->pg = k / (2 * rows); t->col = k % 2; t->y = y + (k % (2 * rows)) / 2 * (tile_h + TGAP); t->h = tile_h + TGAP;
 			}
-			tiles_y = y; tiles_h = rows * (TILE_H + TGAP);
+			tiles_y = y; tiles_h = rows * (tile_h + TGAP);
 			y += tiles_h + (npages > 1 ? DOTS_H : 0); i += n - 1;
 			if (page >= npages) page = npages - 1;
 			continue;
 		}
-		switch (e->t) {
-		case 'M': e->h = wrap(e->a, 0, 0, w - 16, 2, 0, 0) + 20; break;
-		case 'L': { char k = e->b ? *e->b : 'n'; int dot = k == 'g' || k == 'y' || k == 'r';   /* same width as when drawn */
-			e->h = wrap(e->a, 0, 0, dot ? w - 26 : w, 2, 0, 0) + 6; break; }
-		case 'l': e->h = wrap(e->a, 0, 0, w, 1, 0, 0) + 4; break;
-		case 'P': e->h = 26; break;
-		case 'B': e->h = (e->c && *e->c == 'i') ? 66 : 72; break;
-		case 'S': case 'D': e->h = 72; break;
-		case 'F': e->h = 22 + 54 + 12; break;
-		case 'G': e->h = 18; break;
-		case 'Q': { int c, r, m = qr_dims(e->a, &c, &r); e->h = (r + 8) * m + 12; break; }
-		}
+		e->h = el_h(e, w);
 		y += e->h;
 	}
 	content_h = y + 24;
@@ -477,11 +488,12 @@ static void render(void) {
 		case 'C': {   /* home tile: colored icon over its name */
 			int x = tile_x(e), tw0 = tile_w(), ic = icon_id(e->c);
 			if (x >= SW || x + tw0 <= 0) break;   /* on another page */
-			rrect(x, y, tw0, TILE_H, 20, i == pressed ? C_DOWN : C_ITM);
-			if (ic >= 0) icon_sz(x + (tw0 - 46) / 2, y + 20, ic, 1, icon_color(e->c));
+			rrect(x, y, tw0, tile_h, 20, i == pressed ? C_DOWN : C_ITM);
 			const char *s = e->b ? e->b : "";
-			int lines = wrap2(s, 0, 0, tw0 - 20, 2, 0, 0, 1) / LINE(2);
-			wrap2(s, x + 10, y + (lines > 1 ? 70 : 82), tw0 - 20, 2, C_TXT, 1, 1);
+			/* icon and name centered as a block, whatever the tile height */
+			int lines = wrap2(s, 0, 0, tw0 - 20, 2, 0, 0, 1) / LINE(2), top = y + (tile_h - 46 - 8 - lines * LINE(2)) / 2;
+			if (ic >= 0) icon_sz(x + (tw0 - 46) / 2, top, ic, 1, icon_color(e->c));
+			wrap2(s, x + 10, top + 54, tw0 - 20, 2, C_TXT, 1, 1);
 			break; }
 		case 'B': {
 			char st = e->c ? *e->c : 'n'; uint32_t bg = st == 'p' ? C_ACC : st == 'd' ? C_DNGB : st == 'i' ? C_ITM : C_BTN;
@@ -732,7 +744,7 @@ static int hit(int x, int y) {
 	int cy = y - TOP + scroll;
 	for (int i = 0; i < nel; i++) {
 		struct el *e = &els[i];
-		if (e->t == 'C' && cy >= e->y && cy < e->y + TILE_H && x >= tile_x(e) && x < tile_x(e) + tile_w()) return i;
+		if (e->t == 'C' && cy >= e->y && cy < e->y + tile_h && x >= tile_x(e) && x < tile_x(e) + tile_w()) return i;
 		if ((e->t == 'B' || e->t == 'S' || e->t == 'F' || e->t == 'D') && cy >= e->y && cy < e->y + e->h - 6) return i;
 	}
 	return -1;
