@@ -811,6 +811,11 @@ def pin_try(pin):
         log('Pantalla de bloqueo: %d códigos erróneos seguidos'%n)
         raise ValueError('Código incorrecto. Espera %d s (quedan %d intentos)'%(pin_wait(n),PIN_MAX-n))
     raise ValueError('Código incorrecto')
+def pin_need(f):
+    # on the screen the current code is needed to remove it; misses count like
+    # on the lock screen (the web panel can still remove it: forgotten code)
+    if not f.get('pincur'):raise ValueError('Escribe el código actual')
+    pin_try(f['pincur'])
 def display_save(**kw):
     conf={'timeout':display_timeout(),'brightness':display_brightness(),'lock':display_lock(),'pin':display_pin()};conf.update(kw)
     if not conf['lock'] or not conf['pin']:conf.pop('pin')
@@ -821,7 +826,8 @@ def ui_disp(arg):
     lk=display_lock();s.toggle('disp.lock:0' if lk else 'disp.lock:1','Pantalla de bloqueo',lk)
     s.small('Al apagarse, un toque solo enciende el reloj: hay que deslizar para usarla. Evita pulsaciones sin querer.','m')
     if lk and display_pin():
-        s.label('Código de desbloqueo: activado','g').button('disp.pinoff','Quitar el código','d')
+        s.label('Código de desbloqueo: activado','g').field('pincur','Código actual (para quitarlo o desactivar el bloqueo)','','q')
+        s.button('disp.pinoff','Quitar el código','d')
     elif lk:
         s.field('pin','Código de desbloqueo (4 a 8 cifras, opcional)','','q').field('pin2','Repite el código','','q')
         s.button('disp.pin','Poner código','p')
@@ -1210,9 +1216,10 @@ def ui_action(a, f):
     if verb=='disp.lock':
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         had=display_pin() is not None
+        if had and arg=='0':pin_need(f)   # turning the lock off forgets the code
         display_save(lock=arg=='1');return 'disp','Pantalla de bloqueo '+('activada' if arg=='1' else 'desactivada'+(' y código quitado' if had else ''))
     if verb=='disp.pin':pin_set(f.get('pin',''),f.get('pin2',''));return 'disp','Código puesto: se pedirá al desbloquear'
-    if verb=='disp.pinoff':pin_clear();return 'disp','Código quitado'
+    if verb=='disp.pinoff':pin_need(f);pin_clear();return 'disp','Código quitado'
     if verb=='lock.try':pin_try(f.get('pin',''));return 'home',None
     if verb=='lock.state':return 'home',None
     if verb=='disp.bright':

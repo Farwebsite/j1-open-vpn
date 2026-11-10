@@ -186,9 +186,15 @@ class Tests(unittest.TestCase):
   self.assertNotIn(b'\te\n',app.ui_request(b'a=lock.try&s=home&f_pin=2468'));self.assertFalse((app.STATE/'pin-fail.json').exists())
   app.display_save(timeout=15);self.assertIsNotNone(app.display_pin())   # other settings keep the code
   self.assertIn('lockpinoff',app.lock_section())
-  self.assertIn(b'y c\xa2digo quitado',app.ui_request(b'a=disp.lock%3A0&s=disp'));self.assertIsNone(app.display_pin())
+  self.assertIn(b'F\tpincur\t',app.ui_request(b'a=nav%3Adisp'))
+  self.assertIn(b'Escribe el c\xa2digo actual',app.ui_request(b'a=disp.lock%3A0&s=disp'));self.assertIsNotNone(app.display_pin())
+  self.assertIn(b'incorrecto',app.ui_request(b'a=disp.lock%3A0&s=disp&f_pincur=1111'));self.assertTrue(app.display_lock())
+  self.assertEqual(app.PIN_FAIL['n'],1)   # counts like the lock screen
+  self.assertIn(b'y c\xa2digo quitado',app.ui_request(b'a=disp.lock%3A0&s=disp&f_pincur=2468'));self.assertIsNone(app.display_pin())
   app.ui_request(b'a=disp.lock%3A1&s=disp');app.ui_request(b'a=disp.pin&s=disp&f_pin=13579&f_pin2=13579')
-  self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=disp.pinoff&s=disp'));self.assertIsNone(app.display_pin())
+  self.assertIn(b'Escribe el c\xa2digo actual',app.ui_request(b'a=disp.pinoff&s=disp'));self.assertIsNotNone(app.display_pin())
+  self.assertIn(b'incorrecto',app.ui_request(b'a=disp.pinoff&s=disp&f_pincur=2468'));self.assertIsNotNone(app.display_pin())
+  self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=disp.pinoff&s=disp&f_pincur=13579'));self.assertIsNone(app.display_pin())
  def test_lock_screen(self):
   out=app.ui_request(b'a=nav%3Adisp&s=home');self.assertTrue(app.display_lock());self.assertIn(b'\nK\t1\t0\t0\n',out)
   self.assertIn(b'\nS\tdisp.lock:0\tPantalla de bloqueo\t1\n',out)
