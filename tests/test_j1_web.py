@@ -118,6 +118,13 @@ class Tests(unittest.TestCase):
   self.assertIn('Activo: 1 clave autorizada',app.ssh_section());self.assertIn('sshoff',app.ssh_section())
   app.save('vpn.json',{'port':51820,'endpoint':'','private_key':'S','public_key':'P','clients':[]})
   self.assertIn(b'id=ssh',app.page());app.ssh_disable();app.ssh_disable();self.assertEqual(app.ssh_keys(),[])
+ def test_speed_keeps_screen_on(self):
+  # while measuring, the Velocidad screen stays on (O 0) so the result is seen
+  with app.LOCK:app.SPEED.clear();app.SPEED.update(running=True,link='Wi-Fi')
+  self.assertIn(b'\nO\t0\n',app.ui_request(b'a=nav%3Aspeed'));self.assertIn(b'\nO\t60\n',app.ui_request(b'a=nav%3Ahome'))
+  with app.LOCK:app.SPEED['running']=False
+  self.assertIn(b'\nO\t60\n',app.ui_request(b'a=nav%3Aspeed'))
+  with app.LOCK:app.SPEED.clear()
  def test_speed_screen(self):
   app.SPEED.clear();self.assertIn(b'speed.run\tEmpezar',app.ui_request(b'a=nav%3Aspeed'))
   app.SPEED.update(running=True,link='cable (eth0)',ping='9 ms',down='midiendo...')

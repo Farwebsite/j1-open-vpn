@@ -9,80 +9,81 @@ LOCK = threading.RLock()
 CSRF = secrets.token_hex(32)
 RUNTIME = {'vpn': 'Iniciando', 'ddns': 'Sin configurar', 'ddns6': 'Desactivado', 'upnp': 'Comprobando...', 'scan': 'Pulsa Buscar redes', 'networks': []}
 CSS = '''
-:root{--bg:#000;--grp:#1c1c1e;--field:#2c2c2e;--sep:#38383a;--txt:#fff;--mut:#8e8e93;--acc:#0a84ff;--grn:#30d158;--red:#ff453a;--yel:#ffd60a;--ease:cubic-bezier(.32,.72,0,1);color-scheme:dark}
+:root{--bg:#000;--grp:#1c1c1e;--field:#2c2c2e;--sep:#38383a;--txt:#ebebf5;--mut:#8e8e93;--acc:#0a84ff;--grn:#30d158;--red:#ff453a;--yel:#ffd60a;--ease:cubic-bezier(.32,.72,0,1);color-scheme:dark}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html{background:var(--bg)}
-body{margin:0;background:var(--bg);color:var(--txt);font:17px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
-a{color:var(--acc);text-decoration:none}p{margin:8px 0}h3{font-size:13px;font-weight:400;color:var(--mut);text-transform:uppercase;margin:24px 16px 6px}
+body{margin:0;background:var(--bg);color:var(--txt);font:17px/1.35 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+a{color:var(--acc);text-decoration:none}p{margin:8px 0}h3{font-size:13px;font-weight:500;color:var(--mut);text-transform:uppercase;margin:24px 4px 6px}
 .ic{width:20px;height:20px;fill:currentColor;flex:none}
-.nt{width:29px;height:29px;border-radius:7px;display:grid;place-items:center;color:#fff;flex:none}.nt .ic{width:19px;height:19px}
-.group{background:var(--grp);border-radius:10px;overflow:hidden}
-.group>*{position:relative;display:flex;align-items:center;gap:14px;min-height:44px;padding:8px 16px;color:var(--txt)}
-.group>*+*::before{content:"";position:absolute;top:0;right:0;left:16px;border-top:.5px solid var(--sep)}
-nav.group>*+*::before{left:59px}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--grn);flex:none}.dot.y{background:var(--yel)}
-.chev{margin-left:auto;color:#5a5a5e;font-size:22px;line-height:1}
+.bar{display:flex;align-items:center;gap:12px;height:60px}.bar h1{flex:1;margin:0;font-size:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.clock{font-size:15px;font-weight:600}.bat{font-size:15px;font-weight:600;color:var(--grn)}.bat.low{color:var(--red)}
+.status p{display:flex;align-items:center;gap:10px;margin:7px 0}.status .m{color:var(--mut)}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}.dot.g{background:var(--grn)}.dot.y{background:var(--yel)}.dot.r{background:var(--red)}
+nav .t{display:flex;color:var(--txt)}
+.brand{color:var(--mut);font-size:14px;margin:4px 2px;line-height:1.5}
 label{display:block;margin:16px 4px 6px;font-size:13px;color:var(--mut)}
-input,select,textarea{width:100%;font:inherit;color:var(--txt);background:var(--field);border:1px solid transparent;border-radius:10px;padding:11px 14px;outline:none}
+input,select,textarea{width:100%;font:inherit;color:var(--txt);background:var(--field);border:1px solid transparent;border-radius:12px;padding:11px 14px;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--acc)}input::placeholder,textarea::placeholder{color:#636366}
 label:has(input[type=checkbox]){display:flex;align-items:center;justify-content:space-between;flex-direction:row-reverse;gap:12px;color:var(--txt);font-size:17px;margin:12px 0}
 input[type=checkbox]{appearance:none;-webkit-appearance:none;position:relative;width:51px;height:31px;padding:0;border:0;border-radius:99px;background:#39393d;flex:none;cursor:pointer;transition:background .25s}
 input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:left .25s var(--ease)}
 input[type=checkbox]:checked{background:var(--grn)}input[type=checkbox]:checked::after{left:22px}
-button{display:block;width:100%;margin-top:16px;padding:12px;border:0;border-radius:12px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
-button:active{opacity:.7}.sec{background:var(--field);color:var(--acc)}.danger{background:var(--field);color:var(--red)}
+button{display:block;width:100%;margin-top:16px;padding:13px;border:0;border-radius:14px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:active{opacity:.7}.sec{background:var(--field);color:var(--txt)}.danger{background:#3a1616;color:var(--red)}
 small,.muted{color:var(--mut);font-size:13px}form small{display:block;margin:8px 4px 0}
-section>p{margin:12px 4px}section form{background:var(--grp);border-radius:12px;padding:2px 16px 16px;margin:12px 0}
+section>p{margin:12px 4px}section form{background:var(--grp);border-radius:16px;padding:2px 16px 16px;margin:12px 0}
 details{margin:12px 4px}summary{cursor:pointer;color:var(--acc)}
 code{background:var(--field);padding:1px 6px;border-radius:6px;font-size:.85em;overflow-wrap:anywhere}
-.list{list-style:none;padding:0;margin:8px 0;background:var(--grp);border-radius:12px;overflow:hidden}
-.list li{position:relative;display:flex;align-items:center;gap:12px;padding:10px 16px}.list li+li::before{content:"";position:absolute;top:0;right:0;left:59px;border-top:.5px solid var(--sep)}
+.list{list-style:none;padding:0;margin:8px 0;background:var(--grp);border-radius:16px;overflow:hidden}
+.list li{position:relative;display:flex;align-items:center;gap:12px;padding:10px 16px}.list li+li::before{content:"";position:absolute;top:0;right:0;left:58px;border-top:.5px solid var(--sep)}
 .list .who{flex:1;min-width:0;overflow-wrap:anywhere}.list .who small{display:block}.list form{margin:0;padding:0;background:none}
-.list .tile{width:29px;height:29px;border-radius:7px;display:grid;place-items:center;background:var(--field)}
-.btn2{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;background:var(--field);color:var(--acc);font-weight:600;font-size:15px}.btn2 .ic{width:17px;height:17px}
+.list .tile{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--field)}
+.btn2{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;background:var(--field);color:var(--txt);font-weight:600;font-size:15px}.btn2 .ic{width:17px;height:17px}
 .list button{width:auto;margin:0;padding:7px 12px;border-radius:99px;font-size:15px}
-.notice{position:fixed;z-index:30;top:10px;left:50%;width:min(92vw,420px);margin:0;padding:13px 16px;border-radius:16px;background:rgba(44,44,46,.92);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);color:var(--txt);font-size:15px;box-shadow:0 10px 30px rgba(0,0,0,.5);transform:translate(-50%,0);animation:toast 6s var(--ease) forwards;pointer-events:none}
+.notice{position:fixed;z-index:30;top:10px;left:50%;width:min(92vw,420px);margin:0;padding:13px 16px;border-radius:16px;background:rgba(44,44,46,.94);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);color:var(--txt);font-size:15px;box-shadow:0 10px 30px rgba(0,0,0,.5);transform:translate(-50%,0);animation:toast 6s var(--ease) forwards;pointer-events:none}
 .notice::before{content:"\\2713";color:var(--grn);font-weight:700;margin-right:8px}.notice.err::before{content:"!";color:var(--red)}.notice.err{animation-duration:10s}
 p.err{color:var(--red);margin:12px 4px}
 @keyframes toast{0%{transform:translate(-50%,-140%)}8%,88%{transform:translate(-50%,0)}100%{transform:translate(-50%,-140%);visibility:hidden}}
-footer{color:var(--mut);font-size:12px;text-align:center;padding:24px 16px 34px}footer a{color:var(--mut)}footer p{margin:4px 0}
+footer{color:var(--mut);font-size:12px;text-align:center;padding:20px 16px 34px}footer p{margin:4px 0}
 .tile{display:none}
-/* iPhone: Settings-like list; a section slides in from the right and back out */
+/* phone: the J1's own home screen; tile pages swipe sideways, a section slides in from the right */
 @media(max-width:899px){
 html,body{overflow-x:hidden}
 .root{padding:0 16px;transition:transform .45s var(--ease),filter .45s}
-body:has(main section:target) .root{transform:translateX(-28%);filter:brightness(.6);pointer-events:none}
-header{padding:52px 4px 10px}h1{font-size:34px;font-weight:700;letter-spacing:.2px;margin:0}
-.chips{margin:14px 0 26px}
+body:has(main section:target) .root{transform:translateX(-28%);filter:brightness(.55);pointer-events:none}
+.bar{margin:0 -16px;padding:0 16px;border-bottom:1px solid var(--grp)}
+.status{margin:12px 2px 14px}
+nav.pages{display:grid;grid-auto-flow:column;grid-auto-columns:100%;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;overscroll-behavior-x:contain;margin:0 -16px}nav.pages::-webkit-scrollbar{display:none}
+.page{scroll-snap-align:start;scroll-snap-stop:always;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(3,132px);gap:12px;padding:0 16px}
+nav .t{flex-direction:column;align-items:center;justify-content:center;gap:12px;border-radius:20px;background:var(--grp);font-size:17px;text-align:center;padding:8px 6px;line-height:1.2}
+nav .t:active{background:#3a3a3c}nav .t .ic{width:46px;height:46px}
+.dots{display:flex;justify-content:center;gap:12px;margin:14px 0 10px}.dots i{width:10px;height:10px;border-radius:50%;background:#3a3a3c;cursor:pointer}.dots i.on{background:#fff}
 main section{position:fixed;inset:0;z-index:10;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px 40px;transform:translateX(100%);visibility:hidden;box-shadow:-10px 0 30px rgba(0,0,0,.6);transition:transform .45s var(--ease),visibility 0s .45s}
 main section:target{transform:none;visibility:visible;transition:transform .45s var(--ease),visibility 0s}
-h2{position:sticky;top:0;z-index:2;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:50px;margin:0 -16px 4px;padding:0 8px;background:rgba(0,0,0,.82);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:.5px solid var(--sep);font-size:17px;font-weight:600;text-align:center;white-space:nowrap}
-.back{justify-self:start;font-size:17px;font-weight:400;padding:8px}.back::before{content:"\\2039";font-size:32px;line-height:0;vertical-align:-5px;margin-right:5px}
+h2{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:6px;height:60px;margin:0 -16px 6px;padding:0 16px 0 6px;background:rgba(0,0,0,.88);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:1px solid var(--grp);font-size:21px;font-weight:700}
+.back{display:grid;place-items:center;width:44px;height:44px}.back::before{content:"";width:13px;height:13px;border-left:3px solid var(--acc);border-bottom:3px solid var(--acc);transform:rotate(45deg);margin-left:6px;border-radius:2px}
 }
-/* Mac: a System Settings window, sidebar + one section at a time */
+/* PC: the same parts as a sidebar and one section at a time */
 @media(min-width:900px){
-body{min-height:100vh;padding:40px 24px;font-size:13px;background:radial-gradient(1200px 700px at 20% 0,#2b3a67 0,transparent 60%),radial-gradient(900px 600px at 100% 100%,#4a2a5e 0,transparent 55%),#111}
-.app{display:grid;grid-template-columns:250px 1fr;max-width:1080px;height:calc(100vh - 80px);min-height:600px;margin:0 auto;border-radius:12px;overflow:hidden;background:#1e1e1e;border:1px solid #444;box-shadow:0 30px 90px rgba(0,0,0,.65)}
-.root{position:relative;overflow-y:auto;padding:52px 10px 12px;background:rgba(50,50,52,.82);-webkit-backdrop-filter:blur(40px);backdrop-filter:blur(40px);border-right:1px solid #000}
-.root::before{content:"";position:absolute;top:18px;left:20px;width:12px;height:12px;border-radius:50%;background:#ff5f57;box-shadow:20px 0 #febc2e,40px 0 #28c840}
-header{padding:0 10px 6px}h1{font-size:15px;font-weight:700;margin:0}
-.chips{background:none;margin:4px 0 14px}.chips>*{min-height:22px;padding:2px 10px;font-size:12px;color:var(--mut);gap:8px}.chips>*::before{display:none}.dot{width:7px;height:7px}
-nav.group{background:none;border-radius:0}nav.group>*{min-height:30px;padding:4px 10px;gap:9px;border-radius:7px;font-size:13px}nav.group>*::before{display:none}
-nav a:hover{background:rgba(255,255,255,.06)}.nt{width:21px;height:21px;border-radius:5px}.nt .ic{width:14px;height:14px}.chev{display:none}
-main{overflow-y:auto;padding:0 32px 30px;background:#1e1e1e}
+body{font-size:14px}
+.app{display:grid;grid-template-columns:290px 1fr;min-height:100vh}
+.root{position:sticky;top:0;height:100vh;overflow-y:auto;padding:10px 14px 18px;background:#121214;border-right:1px solid #232326}
+.bar{height:auto;padding:12px 8px 4px}.bar h1{font-size:17px}.clock,.bat{font-size:13px}
+.status{margin:8px 8px 16px;font-size:13px}.status p{margin:5px 0}.dot{width:8px;height:8px}
+nav.pages{display:block}.page{display:contents}
+nav .t{align-items:center;gap:12px;padding:8px 10px;margin:1px 0;border-radius:10px;font-size:14px}nav .t:hover{background:#1f1f22}
+.dots{display:none}.brand{font-size:12px;margin:18px 8px 0}
+main{padding:0 48px 40px;max-width:860px}
 main section{display:none}main section:target,main:not(:has(section:target)) #wifi{display:block}
-h2{position:sticky;top:0;z-index:2;display:flex;align-items:center;height:52px;margin:0 -32px 14px;padding:0 32px;background:rgba(30,30,30,.9);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:1px solid #000;font-size:15px;font-weight:700}
+h2{position:sticky;top:0;z-index:2;display:flex;align-items:center;height:64px;margin:0 -48px 10px;padding:0 48px;background:rgba(0,0,0,.85);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:1px solid #1c1c1e;font-size:22px;font-weight:700}
 .back{display:none}
-label{font-size:12px;margin:12px 2px 5px}label:has(input[type=checkbox]){font-size:13px}
-input,select,textarea{font-size:13px;padding:6px 10px;border-radius:6px;background:#2a2a2c;border:1px solid #3a3a3c}
-input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(10,132,255,.35)}
-input[type=checkbox]{width:38px;height:22px}input[type=checkbox]::after{width:18px;height:18px}input[type=checkbox]:checked::after{left:18px}
-button{display:inline-block;width:auto;min-width:96px;margin:14px 0 0;padding:5px 16px;border-radius:6px;font-size:13px;font-weight:500;box-shadow:0 1px 1px rgba(0,0,0,.3),inset 0 .5px 0 rgba(255,255,255,.25)}
-.sec,.danger{background:#5a5a5e;color:#fff}.danger{color:#ff6961}
-section>p{margin:10px 2px}section form{background:#2a2a2c;border:1px solid #333336;border-radius:10px;padding:2px 16px 14px;margin:12px 0}
-small,.muted{font-size:12px}h3{font-size:11px;margin:20px 2px 6px}
-.list{background:#2a2a2c;border:1px solid #333336;border-radius:10px}.list li{padding:8px 14px}.list button,.btn2{font-size:12px;padding:4px 10px;border-radius:6px}.btn2{background:#5a5a5e;color:#fff}
-.notice{top:52px;font-size:13px}
-footer{padding:14px}
+label{font-size:12px;margin:14px 2px 6px}label:has(input[type=checkbox]){font-size:14px}
+input,select,textarea{font-size:14px;padding:8px 12px;border-radius:8px;background:#2a2a2c;border:1px solid #3a3a3c}
+input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(10,132,255,.3)}
+input[type=checkbox]{width:42px;height:25px}input[type=checkbox]::after{width:21px;height:21px}input[type=checkbox]:checked::after{left:19px}
+button{display:inline-block;width:auto;min-width:120px;margin:16px 0 0;padding:8px 18px;border-radius:8px;font-size:14px}
+section>p{margin:10px 2px}section form{background:#1c1c1e;border:1px solid #262628;border-radius:12px;padding:4px 20px 18px;margin:14px 0}
+small,.muted{font-size:12px}.list{background:#1c1c1e;border:1px solid #262628;border-radius:12px}.list li{padding:8px 16px}.list button,.btn2{font-size:13px;padding:6px 12px;border-radius:8px}
+.notice{top:16px;font-size:14px}footer{text-align:left;padding:16px 48px 30px;margin-left:290px;max-width:860px}
 }
 '''.replace('\n','')
 # ---- icons: generated by rootfs/display/gen-font.py from Material Icons (Apache 2.0)
@@ -101,9 +102,13 @@ ICONS_SVG={
 }
 # ---- end of icons
 # each section: icon and color of its tile on the screen
-SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('usb','Cable','cable','#bf5af2'),('vpn','WireGuard','vpn','#ff9f0a'),
-          ('dns','Cloudflare','dns','#0a84ff'),('clave','Contraseña','key','#5ac8fa'),('red','Red J1','ap','#64d2ff'),
-          ('pantalla','Bloqueo','lock','#98989d'),('hora','Hora','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'))
+SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap','#64d2ff'),('vpn','WireGuard','vpn','#ff9f0a'),
+          ('dns','Cloudflare DNS','dns','#0a84ff'),('usb','Cable USB','cable','#bf5af2'),('clave','Contraseña del panel','key','#5ac8fa'),
+          ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'))
+# moves the page dots of the phone home screen (the swipe itself is CSS)
+DOTS_JS=(b"(function(){var n=document.querySelector('nav.pages'),d=document.querySelectorAll('.dots i');if(!n||!d.length)return;"
+         b"function u(){var p=Math.round(n.scrollLeft/n.clientWidth);for(var i=0;i<d.length;i++)d[i].className=i==p?'on':''}"
+         b"n.addEventListener('scroll',u,{passive:true});d.forEach(function(e,i){e.addEventListener('click',function(){n.scrollTo({left:i*n.clientWidth,behavior:'smooth'})})})})();")
 CSS+=''.join('body:has(#%s:target) nav a[href="#%s"]%s{background:#0a64d9}'%(sid,sid,',body:not(:has(main section:target)) nav a[href="#wifi"]' if sid=='wifi' else '') for sid,_,_,_ in SECTIONS).join(('@media(min-width:900px){','}'))
 def icon(name,color=''):
     return ('<svg class=ic viewBox="0 -512 512 512" aria-hidden=true'+(' style="color:'+color+'"' if color else '')+
@@ -112,7 +117,7 @@ def with_icons(body):
     # '<section id=x><h2>' gets the tile of section x and the back arrow (phone);
     # its forms post to '#x' so the answer opens on the same section
     for sid,_,ic,color in SECTIONS:
-        body=body.replace('<section id='+sid+'><h2>','<section id='+sid+'><h2><a class=back href="#top">J1</a>',1)
+        body=body.replace('<section id='+sid+'><h2>','<section id='+sid+'><h2><a class=back href="#top" aria-label=Volver></a>',1)
         a=body.find('<section id='+sid+'>')
         if a>=0:
             b=body.find('</section>',a)
@@ -561,6 +566,18 @@ def ssh_section():
         +('<form method=post>'+hidden()+'<input type=hidden name=action value=sshoff><button class=danger>Desactivar SSH (borrar todas las claves)</button></form>' if n else '')+'</section>')
 
 def hidden():return '<input type="hidden" name="csrf" value="'+CSRF+'">'
+def home_html():
+    # same lines as the screen's home (ui_home), then its tiles in pages of 6
+    try:bat=int(Path('/sys/class/power_supply/battery/capacity').read_text())
+    except (OSError,ValueError):bat=None
+    out=['<header class=bar><h1>J1 · Servidor VPN</h1><span class=clock>'+time.strftime('%H:%M')+'</span>'+
+         ('<span class="bat'+(' low' if bat<=15 else '')+'">%d%%</span>'%bat if bat is not None else '')+'</header><div class=status>']
+    for r in ui_home().rows:
+        if r[0]=='L':out.append('<p'+(' class=m' if r[2] not in 'gyr' else '')+'>'+('<span class="dot '+r[2]+'"></span>' if r[2] in 'gyr' else '')+esc(r[1])+'</p>')
+    pages=[SECTIONS[i:i+6] for i in range(0,len(SECTIONS),6)]
+    out.append('</div><nav class=pages>'+''.join('<div class=page>'+''.join('<a class=t href="#'+sid+'">'+icon(ic,color)+'<span>'+esc(name)+'</span></a>' for sid,name,ic,color in pg)+'</div>' for pg in pages)+'</nav>')
+    out.append('<div class=dots>'+''.join('<i'+(' class=on' if i==0 else '')+'></i>' for i in range(len(pages)))+'</div><p class=brand>'+esc(BRAND)+'<br>'+REPO+'</p>')
+    return ''.join(out)
 def page(message='',error=False):
     v=ensure_vpn_state();cf=load('cloudflare.json',{})
     try:wifi=(RUN/'wifi-summary').read_text().strip()
@@ -568,11 +585,7 @@ def page(message='',error=False):
     note='<p class="notice'+(' err' if error else '')+'" role=status>'+esc(message)+'</p>'
     vpn_ok=RUNTIME['vpn'].startswith('Activo');wifi_ok=bool(re.search(r'\d+\.\d+\.\d+\.\d+',wifi))
     out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=theme-color content="#000000"><title>J1 VPN</title><style>'+CSS+'</style>'
-         '<div class=app id=top><aside class=root><header><h1>J1 · Servidor VPN</h1></header><div class="chips group"><span class=chip><span class="dot'+('' if vpn_ok else ' y')+'"></span>'+esc(RUNTIME['vpn'])+'</span>'
-         '<span class=chip><span class="dot'+('' if wifi_ok else ' y')+'"></span>'+esc(wifi)+'</span>'
-         '<span class=chip><span class="dot'+('' if RUNTIME['ddns'].startswith('Actualizado') else ' y')+'"></span>DNS: '+esc(RUNTIME['ddns'])+'</span></div><nav class=group>'+
-         ''.join('<a href="#'+sid+'"><span class=nt style="background:'+color+'">'+icon(ic)+'</span>'+esc(name)+'<span class=chev>&#8250;</span></a>' for sid,name,ic,color in SECTIONS)+
-         '</nav></aside><main>'+(note if message else '')]
+         '<div class=app id=top><aside class=root>'+home_html()+         '</aside><main>'+(note if message else '')]
     out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button class=sec>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
     out+=['</select><details><summary>Red oculta o nombre manual</summary><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off></label></details><label>Contraseña Wi-Fi<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Guardar y conectar</button></form><p><small>La red de configuración se mantiene disponible.</small></p></section>',usb_section()]
@@ -582,7 +595,7 @@ def page(message='',error=False):
                    '<a class=btn2 href="/client/'+c['id']+'.conf">'+icon('download')+'.conf</a><form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar</button></form></li>')
     out+=['</ul><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor.</small></p></section>']
     checked=' checked' if cf.get('enabled') else ''
-    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'</main></div><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p><p>'+BRAND+' · <a href="https://'+REPO+'">'+REPO+'</a></p></footer></html>']
+    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'</main></div><script src="/j1.js" defer></script><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p></footer></html>']
     return with_icons(''.join(out)).encode()
 
 # ---- web panel: on/off and who may reach it (set from the screen) ----
@@ -671,7 +684,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             PANEL_AUTH_OK.add(key);return True
         self.send_response(401);self.send_header('WWW-Authenticate','Basic realm="J1 VPN"');self.send_header('Content-Length','0');self.end_headers();return False
     def respond(self, body, code=200, content='text/html; charset=utf-8', filename=None):
-        self.send_response(code);self.send_header('Content-Type',content);self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_response(code);self.send_header('Content-Type',content);self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
         if filename:self.send_header('Content-Disposition','attachment; filename="'+filename+'"')
         self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
     def do_GET(self):
@@ -680,6 +693,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             m=re.fullmatch(r'/client/([0-9a-f]{16})\.conf',urllib.parse.urlsplit(self.path).path)
             if m:
                 self.respond(client_profile(m[1],self.server.server_address[0]).encode(),content='application/x-wireguard-profile',filename='j1-'+m[1]+'.conf');return
+            if urllib.parse.urlsplit(self.path).path=='/j1.js':self.respond(DOTS_JS,content='text/javascript; charset=utf-8');return
             if urllib.parse.urlsplit(self.path).path not in ('/','/cgi-bin/config.cgi'):
                 self.respond(b'No encontrado',404,'text/plain');return
             with LOCK:body=page()
@@ -1370,7 +1384,8 @@ def ui_request(raw):
     try:s=UI_SCREENS.get(name,UI_SCREENS['home'])(arg)
     except (ValueError,RuntimeError) as e:s=ui_home();msg,kind=str(e),'e'
     if msg:s.msg(msg,kind)
-    s.rows.insert(1,['O',str(display_timeout())]);s.rows.insert(1,['V',str(display_brightness())])
+    with LOCK:busy=SPEED.get('running') and name=='speed'
+    s.rows.insert(1,['O','0' if busy else str(display_timeout())]);s.rows.insert(1,['V',str(display_brightness())])
     pin=display_lock() and display_pin() is not None
     s.rows.insert(1,['K','1' if display_lock() else '0','1' if pin else '0','1' if pin and pin_blocked() else '0'])
     return s.encode()

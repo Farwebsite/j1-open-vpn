@@ -176,7 +176,7 @@ static int page, npages = 1, page_dx, tiles_y, tiles_h;
 static int tile_x(const struct el *e) { return PAD + e->col * (tile_w() + TGAP) + (e->pg - page) * SW + page_dx; }
 static struct el els[MAXEL];
 static int nel, content_h, scroll, refresh_s, idle_s = 60;
-static void set_deadline(void), set_bright(void);
+static void set_deadline(void), set_bright(void), poke(void);
 static int dimmed, bright = 143;   /* backlight 0-255 from web.py */
 static char resp[131072], screen_id[128] = "home", back[128], title[128];
 static int busy, shown = 1, wakes;
@@ -260,7 +260,7 @@ static void parse(int keep_dirty) {
 		} else if (fld[0][0] == 'R') refresh_s = fld[1] ? atoi(fld[1]) : 0;
 		else if (fld[0][0] == 'O') {   /* a new time applies at once */
 			int o = fld[1] ? atoi(fld[1]) : 60;
-			if (o != idle_s) { idle_s = o; set_deadline(); }
+			if (o != idle_s) { int was = idle_s; idle_s = o; if (!was) poke(); else set_deadline(); }
 		}
 		else if (fld[0][0] == 'V') {   /* brightness too */
 			int v = fld[1] ? atoi(fld[1]) : 143;

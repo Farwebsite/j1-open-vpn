@@ -23,7 +23,8 @@ json.dump({'enabled': True, 'hostname': 'vpn.ejemplo.com', 'zone_id': '0' * 32, 
           open(base / 'state/cloudflare.json', 'w'))
 (base / 'state/admin-password').write_text('7KQ2M9XR4TPA\n')
 for name, text in {'wifi-summary': 'Wi-Fi: 192.168.1.40 (IP fija)', 'eth-summary': 'Cable: sin adaptador',
-                   'ap-name': 'AP: DIRECT-J1-VPN-71D9'}.items():
+                   'vpn-summary': 'WG: UDP 51820 / 2 clientes', 'ap-name': 'AP: DIRECT-J1-VPN-71D9',
+                   'ap-password': 'Clave: 7KQ2M9XR4TPA'}.items():
     (base / 'run' / name).write_text(text + '\n')
 app.RUNTIME.update(vpn='Activo: UDP 51820', ddns='Actualizado: vpn.ejemplo.com', scan='3 redes encontradas',
                    networks=[{'hex': n.encode().hex(), 'name': n, 'signal': s, 'secure': True}
