@@ -37,7 +37,8 @@ Permite lo mismo que la pantalla y además **descargar el archivo `.conf`** de c
 En la pantalla, **Panel web** (baldosa de la segunda página del inicio):
 
 - **Panel web** activado/desactivado. Desactivado, el puerto 80 queda cerrado; la pantalla sigue funcionando igual.
-- **Acceso desde la red local** (desactivado de serie): el panel responde también en la IP del J1 en tu red de casa (Wi-Fi o cable), sea fija o por DHCP; la pantalla muestra la dirección (`http://IP-del-J1`). En la red local va sin cifrar (HTTP): úsalo solo en casa. Por la VPN el panel nunca responde.
+- **Acceso desde la red local** (desactivado de serie): el panel responde también en la IP del J1 en tu red de casa (Wi-Fi o cable), sea fija o por DHCP; la pantalla muestra la dirección (`http://IP-del-J1`). En la red local va sin cifrar (HTTP): úsalo solo en casa. Solo entran equipos de la misma subred que el J1.
+- **Acceso desde la VPN** (desactivado de serie): desde un dispositivo conectado a WireGuard, en cualquier sitio, en **http://10.66.0.1**. El túnel ya va cifrado. Desactivado, un cliente de la VPN no llega al panel por ninguna dirección.
 - **IP de la Wi-Fi / IP del cable:** accesos directos para poner esa IP por DHCP o fija.
 
 El panel **no** debe publicarse en Internet: no redirijas el TCP 80 en el router.

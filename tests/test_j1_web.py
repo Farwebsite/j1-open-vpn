@@ -133,17 +133,22 @@ class Tests(unittest.TestCase):
   self.assertIn(b'\nV\t255\n',out);self.assertIn(b'\nO\t0\n',out);self.assertIn(b'\nD\tdisp.bright\t255\t15\t255\n',out)
   self.assertIn(b'\te\n',app.ui_request(b'a=disp.bright%3A7&s=disp'));self.assertEqual(app.display_brightness(),255)
  def test_web_panel(self):
-  self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False})
-  lan=lambda:['10.10.1.40']
-  with patch.object(app,'lan_ips',lan):
-   self.assertTrue(app.panel_allowed('192.168.78.1'));self.assertTrue(app.panel_allowed('192.168.77.1'))
-   self.assertFalse(app.panel_allowed('10.10.1.40'));self.assertFalse(app.panel_allowed('10.66.0.1'))
+  self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':False})
+  lan=lambda:[app.ipaddress.ip_interface('10.10.1.40/24')]
+  with patch.object(app,'lan_nets',lan):
+   # peers: AP client, USB PC, home PC, VPN client, Internet
+   ok=lambda:[app.panel_allowed(p) for p in ('192.168.78.23','192.168.77.2','10.10.1.7','10.66.0.2','85.1.2.3')]
+   self.assertEqual(ok(),[True,True,False,False,False])
    out=app.ui_request(b'a=panel.lan%3A1&s=panel');self.assertIn(b'Red local: http://10.10.1.40',out)
-   self.assertTrue(app.panel_allowed('10.10.1.40'));self.assertFalse(app.panel_allowed('10.66.0.1'))
+   self.assertEqual(ok(),[True,True,True,False,False])
+   out=app.ui_request(b'a=panel.vpn%3A1&s=panel');self.assertIn(b'VPN: http://10.66.0.1',out)
+   self.assertEqual(ok(),[True,True,True,True,False])
+   app.ui_request(b'a=panel.lan%3A0&s=panel');self.assertEqual(ok(),[True,True,False,True,False])
    self.assertIn(b'\te\n',app.ui_request(b'a=panel.lan%3A7&s=panel'))
+   self.assertIn(b'\te\n',app.ui_request(b'a=panel.vpn%3Ax&s=panel'))
    out=app.ui_request(b'a=panel.off&s=panel');self.assertIn(b'S\tpanel.on\tPanel web\t0',out)
-   self.assertFalse(app.panel_allowed('192.168.78.1'));self.assertFalse(app.panel_allowed('10.10.1.40'))
-   app.ui_request(b'a=panel.on&s=panel');self.assertEqual(app.panel_conf(),{'enabled':True,'lan':True})
+   self.assertEqual(ok(),[False]*5);self.assertFalse(app.panel_allowed('nonsense'))
+   app.ui_request(b'a=panel.on&s=panel');self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':True})
   self.assertIn(b'C\tnav:panel\tPanel web\tpanel\n',app.ui_request(b'a=nav%3Ahome'))
  def test_lock_screen(self):
   out=app.ui_request(b'a=nav%3Adisp&s=home');self.assertTrue(app.display_lock());self.assertIn(b'\nK\t1\n',out)

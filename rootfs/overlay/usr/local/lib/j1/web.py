@@ -452,30 +452,41 @@ def page(message=''):
     return ''.join(out).encode()
 
 # ---- web panel: on/off and who may reach it (set from the screen) ----
+# Decided by who connects, not by the address used: a VPN client sends
+# everything through the tunnel, so it could also reach 192.168.78.1.
 PANEL_FIXED=('192.168.77.1','192.168.78.1')   # USB and the J1's own network
+PANEL_NETS=tuple(ipaddress.ip_network(n) for n in ('192.168.77.0/30','192.168.78.0/24'))
+VPN_NET=ipaddress.ip_network('10.66.0.0/24')
 PANEL_CHANGED=threading.Event()
 def panel_conf():
     c=load('panel.json',{})
-    return {'enabled':c.get('enabled',True) is not False,'lan':c.get('lan') is True}
+    return {'enabled':c.get('enabled',True) is not False,'lan':c.get('lan') is True,'vpn':c.get('vpn') is True}
 def panel_set(**kw):
     c=panel_conf();c.update(kw);save('panel.json',c);PANEL_CHANGED.set()
-    log('Panel web: '+('activado' if c['enabled'] else 'desactivado')+(' (también en la red local)' if c['enabled'] and c['lan'] else ''))
-def lan_ips():
-    """The J1's addresses on the home network (Wi-Fi / cable), fixed or from DHCP."""
+    extra=[n for n,k in (('red local','lan'),('VPN','vpn')) if c[k]]
+    log('Panel web: '+('activado' if c['enabled'] else 'desactivado')+(' (también desde '+' y '.join(extra)+')' if c['enabled'] and extra else ''))
+def lan_nets():
+    """The J1's networks at home (Wi-Fi / cable), fixed or from DHCP."""
     try:out=command(['ip','-4','-o','addr','show'])
     except (RuntimeError,OSError,subprocess.SubprocessError):return []
-    return [ip for ip in re.findall(r'\binet (\d+\.\d+\.\d+\.\d+)/',out)
-            if ip not in PANEL_FIXED and not ip.startswith('127.') and ip!='10.66.0.1']
-def panel_allowed(local):
+    nets=[]
+    for cidr in re.findall(r'\binet (\d+\.\d+\.\d+\.\d+/\d+)',out):
+        n=ipaddress.ip_interface(cidr)
+        if str(n.ip) not in PANEL_FIXED and not n.ip.is_loopback and n.ip not in VPN_NET:nets.append(n)
+    return nets
+def lan_ips():return [str(n.ip) for n in lan_nets()]
+def panel_allowed(peer):
     c=panel_conf()
-    return c['enabled'] and (local in PANEL_FIXED or (c['lan'] and local in lan_ips()))
+    try:p=ipaddress.ip_address(peer)
+    except ValueError:return False
+    if not c['enabled']:return False
+    if p in VPN_NET:return c['vpn']
+    if any(p in n for n in PANEL_NETS):return True
+    return c['lan'] and any(p in n.network for n in lan_nets())
 class PanelServer(http.server.ThreadingHTTPServer):
-    # one socket for every address (DHCP may change the home one); each
-    # connection is checked against the address it arrived on
+    # one socket for every address (DHCP may change the home one)
     daemon_threads=True
-    def verify_request(self,request,client_address):
-        try:return panel_allowed(request.getsockname()[0])
-        except OSError:return False
+    def verify_request(self,request,client_address):return panel_allowed(client_address[0])
 def panel_serve():
     srv=None
     while True:
@@ -833,6 +844,7 @@ def ui_panel(arg):
     s.toggle('panel.off' if c['enabled'] else 'panel.on','Panel web',c['enabled'])
     if c['enabled']:
         s.toggle('panel.lan:0' if c['lan'] else 'panel.lan:1','Acceso desde la red local',c['lan'])
+        s.toggle('panel.vpn:0' if c['vpn'] else 'panel.vpn:1','Acceso desde la VPN',c['vpn'])
         s.label('Direcciones:')
         s.small('Red del J1: http://192.168.78.1','g').small('USB: http://192.168.77.1','g')
         if c['lan']:
@@ -840,6 +852,7 @@ def ui_panel(arg):
             for ip in ips:s.small('Red local: http://'+ip,'g')
             if not ips:s.small('Red local: sin IP (conecta la Wi-Fi o el cable)','y')
             s.small('En la red local el panel va sin cifrar (HTTP): úsalo solo en casa y no abras el puerto 80 en el router.','y')
+        if c['vpn']:s.small('VPN: http://10.66.0.1 (cifrado por el túnel, desde cualquier sitio)','g')
         s.small('Usuario admin; contraseña: la clave de la red de configuración.','m')
     else:s.small('Puerto 80 cerrado. La pantalla sigue funcionando; sin panel no se descargan los .conf ni se gestiona el SSH.','m')
     s.gap().label('IP del J1 en la red local:')
@@ -1066,9 +1079,10 @@ def ui_action(a, f):
         else:dns_settings(verb=='dns.on',cf.get('hostname',''),cf.get('zone_id',''),'')
         return 'dns','Cloudflare guardado'
     if verb in ('panel.on','panel.off'):panel_set(enabled=verb=='panel.on');return 'panel','Panel web '+('activado' if verb=='panel.on' else 'desactivado')
-    if verb=='panel.lan':
+    if verb in ('panel.lan','panel.vpn'):
         if arg not in ('0','1'):raise ValueError('Opción no válida')
-        panel_set(lan=arg=='1');return 'panel','Acceso desde la red local '+('activado' if arg=='1' else 'desactivado')
+        k=verb[6:];panel_set(**{k:arg=='1'})
+        return 'panel','Acceso desde '+('la red local' if k=='lan' else 'la VPN')+' '+('activado' if arg=='1' else 'desactivado')
     if verb=='tz.set':return 'tz','Zona horaria: '+tz_set(arg)
     if verb=='disp.set':
         t=int(arg) if arg.isdigit() else -1
