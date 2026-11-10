@@ -1046,7 +1046,7 @@ def ui_panel(arg):
         if c['vpn']:s.small('VPN: http://10.66.0.1 (cifrado por el túnel, desde cualquier sitio)','g')
     else:s.small('Puerto 80 cerrado. La pantalla sigue funcionando; sin panel no se descargan los .conf ni se gestiona el SSH.','m')
     own=panel_own_password() is not None
-    s.gap().label('Contraseña del panel (usuario admin):').small('Propia (la de la red de configuración ya no vale)' if own else 'La misma clave de la red de configuración','g' if own else 'm')
+    s.gap().label('Contraseña del panel (usuario admin):').small('Propia' if own else 'La misma clave de la red de configuración','g' if own else 'm')
     s.field('pw','Nueva contraseña (8 a 64 caracteres)','','p').field('pw2','Repítela','','p').button('panel.pw','Cambiar contraseña del panel','p')
     if own:s.button('panel.pwreset','Volver a usar la clave de la red','i')
     s.gap().label('IP del J1 en la red local:')
