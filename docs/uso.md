@@ -22,7 +22,8 @@ Vistas del inicio:
 - **Cable USB:** estado del adaptador de red, 5 V automáticos, IP del cable.
 - **Recursos:** CPU total y por proceso, RAM, disco, tráfico y temperatura.
 - **Pantalla:** brillo (deslizador), pantalla de bloqueo y tiempo de apagado. En los últimos segundos se atenúa; un toque la recupera.
-- **Pantalla de bloqueo** (activada de serie; también se cambia en el panel web, sección *Pantalla de bloqueo*): cuando la pantalla se apaga, un toque o un botón solo muestran la hora y la batería, y hay que deslizar el círculo hasta el final para usarla. Así una mano apoyada encima no pulsa nada. Sin desbloquear vuelve a apagarse a los 10 s. Mantener el botón de encendido abre el menú de apagado igualmente.
+- **Pantalla de bloqueo** (activada de serie; también se cambia en el panel web, sección *Pantalla de bloqueo*): cuando la pantalla se apaga, un toque o un botón solo muestran la hora y la batería, y hay que deslizar el círculo hasta el final para usarla. Así una mano apoyada encima no pulsa nada. Sin desbloquear vuelve a apagarse a los 10 s. Mantener el botón de encendido abre el menú de apagado igualmente (salvo con código).
+- **Código de desbloqueo** (opcional, en *Pantalla*, con la pantalla de bloqueo activada): de 4 a 8 cifras, escrito dos veces. Tras deslizar sale un teclado numérico. Con código el J1 arranca bloqueado y el botón de encendido no se salta el bloqueo. Tras 5 fallos seguidos hay que esperar 30 s (el doble en cada nueva tanda). El J1 solo guarda un hash (PBKDF2 con sal). **Si lo olvidas:** panel web → *Pantalla de bloqueo* → *Quitar el código de desbloqueo*. Desactivar la pantalla de bloqueo también lo borra.
 - **Registros:** sistema, red, VPN y kernel.
 - **Sistema:** encendido, carga, RAM, **zona horaria**, **prueba de velocidad**, reiniciar y apagar.
 

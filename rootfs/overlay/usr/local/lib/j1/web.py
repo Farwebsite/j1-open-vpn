@@ -417,8 +417,9 @@ def ssh_disable():
         except FileNotFoundError:pass
     log('SSH por USB desactivado')
 def lock_section():
-    on=display_lock()
-    return ('<section id=pantalla><h2>Pantalla de bloqueo</h2><p>'+('Activada' if on else 'Desactivada')+'</p><p class=muted>Activada: cuando la pantalla del J1 se apaga, tocarla solo enciende el reloj y hay que deslizar para usarla, así no se pulsa nada sin querer.</p><form method=post>'+hidden()+
+    on=display_lock();pin=on and display_pin() is not None
+    return ('<section id=pantalla><h2>Pantalla de bloqueo</h2><p>'+('Activada' if on else 'Desactivada')+(' · con código' if pin else '')+'</p>'+
+        ('<form method=post>'+hidden()+'<input type=hidden name=action value=lockpinoff><button class=danger>Quitar el código de desbloqueo</button><small>Por si se ha olvidado; se vuelve a poner desde la pantalla (Pantalla de bloqueo).</small></form>' if pin else '')+'<p class=muted>Activada: cuando la pantalla del J1 se apaga, tocarla solo enciende el reloj y hay que deslizar para usarla, así no se pulsa nada sin querer.</p><form method=post>'+hidden()+
         '<input type=hidden name=action value=lock><input type=hidden name=on value='+('0' if on else '1')+'><button>'+('Desactivar' if on else 'Activar')+' pantalla de bloqueo</button></form></section>')
 def tz_section():
     cur=tz_get()
@@ -544,6 +545,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 key=ssh_generate()
                 self.respond(key,content='application/octet-stream',filename='j1-open-vpn-ssh-key');return
             elif action=='sshadd':ssh_add(f.get('key',''));message='Clave añadida. Ya puedes entrar por USB: ssh root@192.168.77.1'
+            elif action=='lockpinoff':pin_clear();message='Código de desbloqueo quitado.'
             elif action=='lock':display_save(lock=f.get('on')=='1');message='Pantalla de bloqueo '+('activada.' if display_lock() else 'desactivada.')
             elif action=='tz':message='Zona horaria: '+tz_set(f.get('zone',''))
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
@@ -706,13 +708,48 @@ def display_brightness():
 # the knob is slid across (on by default)
 def display_lock():
     return load('display.json',{}).get('lock',True) is not False
+# optional unlock code: only a salted PBKDF2 hash is kept; it needs the lock
+# screen, so turning that off forgets the code
+PIN_ITER=20000
+PIN_FAIL={'n':0,'until':0.0}
+def display_pin():
+    p=load('display.json',{}).get('pin')
+    return p if isinstance(p,dict) and 'salt' in p and 'hash' in p else None
+def pin_hash(pin,salt):return hashlib.pbkdf2_hmac('sha256',pin.encode(),bytes.fromhex(salt),PIN_ITER).hex()
+def pin_set(pin,again):
+    if not re.fullmatch(r'\d{4,8}',pin or ''):raise ValueError('El código debe tener de 4 a 8 cifras')
+    if pin!=again:raise ValueError('Los dos códigos no coinciden')
+    salt=secrets.token_hex(16);display_save(lock=True,pin={'salt':salt,'hash':pin_hash(pin,salt)});log('Código de la pantalla de bloqueo puesto')
+def pin_clear():
+    display_save(pin=None);log('Código de la pantalla de bloqueo quitado')
+def pin_try(pin):
+    """Checks a code typed on the lock screen; 5 misses in a row: wait 30 s, doubling."""
+    p=display_pin()
+    if not p:return
+    wait=PIN_FAIL['until']-time.monotonic()
+    if wait>0:raise ValueError('Demasiados intentos: espera %d s'%(wait+1))
+    if hmac.compare_digest(pin_hash(pin or '',p['salt']),p['hash']):PIN_FAIL.update(n=0,until=0.0);return
+    PIN_FAIL['n']+=1;n=PIN_FAIL['n']
+    if n>=5:
+        PIN_FAIL['until']=time.monotonic()+min(30*2**(n-5),3600)
+        log('Pantalla de bloqueo: %d códigos erróneos seguidos'%n)
+        raise ValueError('Código incorrecto. Espera %d s'%min(30*2**(n-5),3600))
+    raise ValueError('Código incorrecto')
 def display_save(**kw):
-    conf={'timeout':display_timeout(),'brightness':display_brightness(),'lock':display_lock()};conf.update(kw);save('display.json',conf)
+    conf={'timeout':display_timeout(),'brightness':display_brightness(),'lock':display_lock(),'pin':display_pin()};conf.update(kw)
+    if not conf['lock'] or not conf['pin']:conf.pop('pin')
+    save('display.json',conf)
 
 def ui_disp(arg):
     s=Screen('disp','Pantalla').label('Brillo:').slider('disp.bright',display_brightness(),BRIGHT_MIN,255)
     lk=display_lock();s.toggle('disp.lock:0' if lk else 'disp.lock:1','Pantalla de bloqueo',lk)
     s.small('Al apagarse, un toque solo enciende el reloj: hay que deslizar para usarla. Evita pulsaciones sin querer.','m')
+    if lk and display_pin():
+        s.label('Código de desbloqueo: activado','g').button('disp.pinoff','Quitar el código','d')
+    elif lk:
+        s.field('pin','Código de desbloqueo (4 a 8 cifras, opcional)','','q').field('pin2','Repite el código','','q')
+        s.button('disp.pin','Poner código','p')
+        s.small('Si lo olvidas, quítalo desde el panel web (sección Pantalla de bloqueo).','m')
     cur=display_timeout();s.gap().label('Apagar la pantalla tras:')
     for t,n in DISPLAY_TIMES:s.button('disp.set:%d'%t,('> ' if t==cur else '')+n,'p' if t==cur else 'i')
     s.small('Se apaga al acabar el tiempo elegido. Los últimos segundos se atenúa: un toque ahí la usa directamente. Apagada, el primer toque solo la enciende.','m')
@@ -1091,7 +1128,11 @@ def ui_action(a, f):
     if verb=='speed.run':speed_start();return 'speed',None
     if verb=='disp.lock':
         if arg not in ('0','1'):raise ValueError('Opción no válida')
-        display_save(lock=arg=='1');return 'disp','Pantalla de bloqueo '+('activada' if arg=='1' else 'desactivada')
+        had=display_pin() is not None
+        display_save(lock=arg=='1');return 'disp','Pantalla de bloqueo '+('activada' if arg=='1' else 'desactivada'+(' y código quitado' if had else ''))
+    if verb=='disp.pin':pin_set(f.get('pin',''),f.get('pin2',''));return 'disp','Código puesto: se pedirá al desbloquear'
+    if verb=='disp.pinoff':pin_clear();return 'disp','Código quitado'
+    if verb=='lock.try':pin_try(f.get('pin',''));return 'home',None
     if verb=='disp.bright':
         b=int(arg) if arg.isdigit() else -1
         if not BRIGHT_MIN<=b<=255:raise ValueError('Brillo no válido')
@@ -1120,7 +1161,7 @@ def ui_request(raw):
     except (ValueError,RuntimeError) as e:s=ui_home();msg,kind=str(e),'e'
     if msg:s.msg(msg,kind)
     s.rows.insert(1,['O',str(display_timeout())]);s.rows.insert(1,['V',str(display_brightness())])
-    s.rows.insert(1,['K','1' if display_lock() else '0'])
+    s.rows.insert(1,['K','1' if display_lock() else '0','1' if display_lock() and display_pin() else '0'])
     return s.encode()
 
 class UIHandler(socketserver.StreamRequestHandler):

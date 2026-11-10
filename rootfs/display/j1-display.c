@@ -163,6 +163,8 @@ static uint32_t icon_color(const char *name);
 
 /* ---- screen model ---- */
 struct el { char t, *a, *b, *c, *d; int y, h, dirty, col, pg; char val[160]; };
+/* field kinds p (password) and q (numeric code) are shown as asterisks */
+static int secret(const struct el *e) { return e->d && (*e->d == 'p' || *e->d == 'q'); }
 /* home tiles (C): two per row */
 #define TGAP 12
 #define TILE_H 136
@@ -179,6 +181,10 @@ static char resp[131072], screen_id[128] = "home", back[128], title[128];
 static int busy, shown = 1, wakes;
 /* lock screen (K line from web.py): set when the screen goes off, a swipe opens it */
 static int lock_on, locked, lock_drag, lock_x;
+/* optional code (K line, 3rd field): after the swipe a keypad asks for it;
+ * web.py checks it (the J1 keeps only a hash) and limits the attempts */
+static int lock_pin, lock_stage, pin_down = -1;
+static char pin_buf[9], pin_msg[80];
 
 static uint32_t tcolor(const char *c) {
 	switch (c ? *c : 'n') { case 'g': return C_GRN; case 'y': return C_YEL; case 'r': return C_RED; case 'm': return C_MUT; default: return C_TXT; }
@@ -260,7 +266,7 @@ static void parse(int keep_dirty) {
 			if (v < 13 || v > 255) v = 143;
 			if (v != bright) { bright = v; if (shown && !dimmed) set_bright(); }
 		}
-		else if (fld[0][0] == 'K') { lock_on = fld[1] && *fld[1] == '1'; if (!lock_on) locked = 0; }
+		else if (fld[0][0] == 'K') { lock_on = fld[1] && *fld[1] == '1'; lock_pin = lock_on && fld[2] && *fld[2] == '1'; if (!lock_on) locked = 0; }
 		else if (fld[0][0] && (fld[1] || fld[0][0] == 'G')) {
 			struct el *e = &els[nel++]; memset(e, 0, sizeof *e);
 			e->t = fld[0][0]; e->a = fld[1] ? fld[1] : (char *)""; e->b = fld[2]; e->c = fld[3]; e->d = fld[4];
@@ -312,7 +318,7 @@ static int keys(struct key *k) {
 	k[n++] = (struct key){336, y, 48, KH, '.', "."};
 	k[n++] = (struct key){384, y, SW - 384, KH, K_OK, "OK"};
 	k[n++] = (struct key){SW - 64, KBY - PVH, 64, PVH, K_CANCEL, "X"};
-	if (kb_el && kb_el->d && *kb_el->d == 'p') k[n++] = (struct key){SW - 136, KBY - PVH, 72, PVH, K_SHOW, kb_show ? "ocul" : "ver"};
+	if (kb_el && secret(kb_el)) k[n++] = (struct key){SW - 136, KBY - PVH, 72, PVH, K_SHOW, kb_show ? "ocul" : "ver"};
 	return n;
 }
 static int kb_down = -1;
@@ -323,7 +329,7 @@ static void draw_keyboard(void) {
 	fill(0, KBY - PVH, SW, 1, C_LINE);
 	text(PAD, KBY - PVH + 4, kb_el && kb_el->b ? kb_el->b : "", 1, C_MUT);
 	char shown_txt[160]; int len = (int)strlen(kb_buf);
-	if (kb_el && kb_el->d && *kb_el->d == 'p' && !kb_show) { memset(shown_txt, '*', len); shown_txt[len] = 0; }
+	if (kb_el && secret(kb_el) && !kb_show) { memset(shown_txt, '*', len); shown_txt[len] = 0; }
 	else snprintf(shown_txt, sizeof shown_txt, "%s", kb_buf);
 	/* the end of the text (where the cursor is) stays visible */
 	int room = SW - 150 - PAD - 16; const char *t = shown_txt;
@@ -379,8 +385,32 @@ static int battery(int *chg) {
 	*chg = !strncmp(st, "Charging", 8) || !strncmp(st, "Full", 4);
 	return bat[0] ? atoi(bat) : -1;
 }
+/* keypad: 1-9, Borrar, 0, OK in three columns */
+#define PIN_R 44
+static void pin_key_pos(int k, int *cx, int *cy) { *cx = SW / 2 + (k % 3 - 1) * 130; *cy = 330 + k / 3 * 105; }
+static int pin_key_at(int x, int y) {
+	for (int k = 0; k < 12; k++) { int cx, cy; pin_key_pos(k, &cx, &cy); if (abs(x - cx) < 60 && abs(y - cy) < 50) return k; }
+	return -1;
+}
+static char pin_key_char(int k) { return k < 9 ? (char)('1' + k) : k == 9 ? '<' : k == 10 ? '0' : '>'; }
+static void render_pin(void) {
+	text_mid(SW / 2, 90, "Introduce el c\xa2" "digo", 2, C_WHITE);
+	int n = (int)strlen(pin_buf), dx = SW / 2 - (n * 30 - 14) / 2;
+	for (int i = 0; i < n; i++) rrect(dx + i * 30, 160, 16, 16, 8, C_WHITE);
+	if (!n) text_mid(SW / 2, 152, "4 a 8 cifras", 1, C_MUT);
+	if (pin_msg[0]) text_mid(SW / 2, 205, pin_msg, 1, C_RED);
+	for (int k = 0; k < 12; k++) {
+		int cx, cy; pin_key_pos(k, &cx, &cy); char c = pin_key_char(k), s[2] = {c, 0};
+		uint32_t bg = k == pin_down ? C_DOWN : c == '>' ? C_ACC : C_ITM;
+		rrect(cx - PIN_R, cy - PIN_R, 2 * PIN_R, 2 * PIN_R, PIN_R, bg);
+		if (c == '<') text_mid(cx, cy - 11, "Borrar", 1, C_WHITE);
+		else text_mid(cx, cy - 16, c == '>' ? "OK" : s, 2, C_WHITE);
+	}
+	text_mid(SW / 2, SH - 70, "Cancelar", 2, C_ACC);
+}
 static void render_lock(void) {
 	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
+	if (lock_stage) { render_pin(); present(); return; }
 	char clock[16], date[16], line[40]; time_t t = time(NULL); int chg, pct = battery(&chg);
 	tz_follow();
 	strftime(clock, sizeof clock, "%H:%M", localtime(&t));
@@ -483,7 +513,7 @@ static void render(void) {
 			rrect(PAD, y + 22, w, 54, 12, e->dirty ? C_YEL : i == pressed ? C_ACC : C_KEYS);
 			rrect(PAD + 2, y + 24, w - 4, 50, 10, C_FLD);
 			char tmp[160]; const char *s = e->val; int n = (int)strlen(s);
-			if (e->d && *e->d == 'p') { memset(tmp, '*', n); tmp[n] = 0; s = tmp; }
+			if (secret(e)) { memset(tmp, '*', n); tmp[n] = 0; s = tmp; }
 			if (!n) text(PAD + 12, y + 33, "Tocar para escribir", 2, C_MUT);
 			else { while (*s && tw(s, 2) > w - 24) s++; text(PAD + 12, y + 33, s, 2, C_WHITE); }
 			break; }
@@ -613,6 +643,7 @@ static void light(int on) {
 	if (!on) {  /* nothing private stays in video memory */
 		kb_open = 0; memset(mem, 0, f.smem_len);
 		if (lock_on) { locked = 1; lock_drag = lock_x = 0; }
+		lock_stage = 0; pin_buf[0] = pin_msg[0] = 0; pin_down = -1;
 	}
 }
 static double last_touch;
@@ -633,6 +664,29 @@ static int refresh_every(void) { return refresh_s > 0 && refresh_s < 30 && now()
 static void resume(void) {
 	char nav[160]; snprintf(nav, sizeof nav, "nav:%s", strncmp(screen_id, "qr", 2) && strncmp(screen_id, "wifiqr", 6) && strcmp(screen_id, "power") ? screen_id : "home");
 	send_action(nav, 0);
+}
+/* web.py checks the code; its error message (wrong, too many tries) is shown */
+static int pin_check(void) {
+	char q[96]; snprintf(q, sizeof q, "a=lock.try&s=home&f_pin=%s", pin_buf);
+	busy_pending = 1; int ok = request(q) == 0; busy = busy_pending = 0;
+	if (!ok) { snprintf(pin_msg, sizeof pin_msg, "Sin respuesta; vuelve a intentarlo"); return 0; }
+	if (!has_error()) return 1;
+	char *m = strstr(resp, "\nM\t"); pin_msg[0] = 0;
+	if (m) { m += 3; int n = (int)strcspn(m, "\t\n"); snprintf(pin_msg, sizeof pin_msg, "%.*s", n, m); }
+	return 0;
+}
+static void pin_tap(int x, int y, int y0) {
+	int k = pin_down; pin_down = -1;
+	if (y0 > SH - 110 && y > SH - 110) { lock_stage = 0; pin_buf[0] = pin_msg[0] = 0; render(); return; }   /* Cancelar */
+	if (k < 0 || k != pin_key_at(x, y)) { render(); return; }
+	char c = pin_key_char(k); int n = (int)strlen(pin_buf);
+	if (c >= '0' && c <= '9' && n < 8) { pin_buf[n] = c; pin_buf[n + 1] = 0; pin_msg[0] = 0; }
+	else if (c == '<' && n) pin_buf[n - 1] = 0;
+	else if (c == '>' && n >= 4) {
+		if (pin_check()) { locked = lock_stage = 0; pin_buf[0] = pin_msg[0] = 0; resume(); return; }
+		pin_buf[0] = 0;
+	}
+	render();
 }
 static void wake(void) {
 	wakes++; light(1); poke();
@@ -681,7 +735,7 @@ static void kb_press(int i) {
 }
 static void open_kb(struct el *e) {
 	kb_el = e; kb_open = 1; kb_show = 0; kb_shift = 0;
-	kb_layer = (e->d && (*e->d == 'n' || *e->d == 'i')) ? 1 : 0;
+	kb_layer = (e->d && (*e->d == 'n' || *e->d == 'i' || *e->d == 'q')) ? 1 : 0;
 	snprintf(kb_buf, sizeof kb_buf, "%s", e->val);
 	/* keep the field visible above the keyboard */
 	int top = e->y, bottom = e->y + e->h;
@@ -709,6 +763,7 @@ static void touch_down(int x, int y) {
 	if (!shown) { ignore = 1; wake(); return; }
 	poke(); t_x0 = x; t_y0 = y; t_scroll0 = scroll; dragging = hdrag = 0; t_maxd = 0; t_time0 = now();
 	/* locked: only a drag that starts on the knob counts */
+	if (locked && lock_stage) { pin_down = pin_key_at(x, y); render(); return; }
 	if (locked) { lock_drag = y > lock_y() - 30 && y < lock_y() + LK_H + 30 && x < PAD + 4 + LK_K + 40; lock_x = 0; return; }
 	if (kb_open && y >= KBY - PVH) { kb_down = kb_hit(x, y); pressed = t_el = -1; }
 	else pressed = t_el = hit(x, y);
@@ -719,7 +774,7 @@ static void touch_move(int x, int y) {
 	int d = abs(y - t_y0) > abs(x - t_x0) ? abs(y - t_y0) : abs(x - t_x0);
 	if (d > t_maxd) t_maxd = d;
 	if (locked) {
-		if (!lock_drag) return;
+		if (lock_stage || !lock_drag) return;
 		lock_x = x - t_x0; if (lock_x < 0) lock_x = 0; if (lock_x > lock_range()) lock_x = lock_range();
 		frame();
 		return;
@@ -743,11 +798,13 @@ static void touch_move(int x, int y) {
 static void touch_up(int x, int y) {
 	double dur = now() - t_time0;
 	if (ignore) { ignore = 0; if (debug) fprintf(stderr, "%.3f ignorado (despertar o pendiente)\n", now()); return; }
-	if (locked) {   /* knob almost at the end: unlocked; otherwise it goes back */
+	if (locked && lock_stage) { pin_tap(x, y, t_y0); return; }
+	if (locked) {   /* knob almost at the end: unlocked (or the keypad); otherwise it goes back */
 		int open = lock_drag && lock_x >= lock_range() * 9 / 10;
-		if (debug) fprintf(stderr, "%.3f bloqueo: arrastre %d de %d%s\n", now(), lock_x, lock_range(), open ? " -> desbloqueada" : "");
+		if (debug) fprintf(stderr, "%.3f bloqueo: arrastre %d de %d%s\n", now(), lock_x, lock_range(), open ? (lock_pin ? " -> pide el codigo" : " -> desbloqueada") : "");
 		lock_drag = lock_x = 0;
-		if (open) { locked = 0; resume(); } else render();
+		if (open && lock_pin) { lock_stage = 1; pin_buf[0] = pin_msg[0] = 0; render(); }
+		else if (open) { locked = 0; resume(); } else render();
 		return;
 	}
 	if (kb_open && t_y0 >= KBY - PVH) {
@@ -808,6 +865,7 @@ static void power_held(void) {
 	if (ioctl(evkey, EVIOCGKEY(sizeof keys), keys) >= 0 && !(keys[KEY_POWER / 8] & (1 << (KEY_POWER % 8)))) return;
 	pwr_woke = 1;   /* the release must not turn the menu off */
 	if (!shown) light(1);
+	if (locked && lock_pin) { if (!shown) light(1); poke(); render(); return; }   /* the code cannot be skipped */
 	locked = 0;   /* holding Power is deliberate: the menu opens even when locked */
 	kb_open = 0; poke(); send_action("nav:power", 0);
 }
@@ -902,6 +960,7 @@ int main(void) {
 	light(1); deadline = now() + 30; last_touch = now();
 	/* J1_UI_START=nav:vpn J1_UI_KB=1: start on a screen / keyboard (testing) */
 	send_action(getenv("J1_UI_START") ? getenv("J1_UI_START") : "nav:home", 1);
+	if (lock_pin) { locked = 1; poke(); render(); }   /* with a code the J1 starts locked */
 	if (!idle_s) poke();
 	if (getenv("J1_UI_KB")) for (int i = 0; i < nel; i++) if (els[i].t == 'F') { open_kb(&els[i]); render(); break; }
 	set_next_clock();
