@@ -168,7 +168,7 @@ struct el { char t, *a, *b, *c, *d; int y, h, dirty, col, pg; char val[160]; };
 #define TILE_H 136
 static int tile_w(void) { return (SW - 2 * PAD - TGAP) / 2; }
 /* the tiles go in pages swiped sideways; page_dx = finger offset while dragging */
-#define DOTS_H 30
+#define DOTS_H 26
 static int page, npages = 1, page_dx, tiles_y, tiles_h;
 static int tile_x(const struct el *e) { return PAD + e->col * (tile_w() + TGAP) + (e->pg - page) * SW + page_dx; }
 static struct el els[MAXEL];
@@ -500,7 +500,7 @@ static void render(void) {
 		}
 	}
 	if (npages > 1) {   /* page dots under the tiles */
-		int dy = TOP + tiles_y + tiles_h - scroll + 8, dx = SW / 2 - (npages * 22 - 12) / 2;
+		int dy = TOP + tiles_y + tiles_h - scroll + 6, dx = SW / 2 - (npages * 22 - 12) / 2;
 		for (int p = 0; p < npages; p++) rrect(dx + p * 22, dy, 10, 10, 5, p == page ? C_WHITE : C_KEY);
 	}
 	clip0 = 0; clip1 = SH;

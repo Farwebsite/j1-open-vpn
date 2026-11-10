@@ -448,7 +448,7 @@ def page(message=''):
         out.append('<tr><td>'+esc(c['name'])+'</td><td>10.66.0.'+str(c['ip'])+'</td><td><a href="/client/'+c['id']+'.conf">Descargar .conf</a><form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar cliente</button></form></td></tr>')
     out+=['</table><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor.</small></p></section>']
     checked=' checked' if cf.get('enabled') else ''
-    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'<footer><small>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</small><p><small>'+BRAND+'</small></footer></html>']
+    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'<footer><small>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</small><p><small>'+BRAND+' · <a href="https://'+REPO+'">'+REPO+'</a></small></footer></html>']
     return ''.join(out).encode()
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -714,6 +714,7 @@ def ui_res(arg):
     return s.small('% de CPU sobre el total de los 2 núcleos (el segundo solo se enciende con carga). Esta vista solo mide mientras está abierta.','m')
 
 BRAND='J1 Open VPN · © 2026 Farweb'
+REPO='github.com/Farwebsite/j1-open-vpn'
 def ui_home():
     s=Screen('home','J1 · Servidor VPN','',3)
     ok=lambda t:'g' if re.search(r'\d+\.\d+\.\d+\.\d+',t) else 'y'
@@ -726,7 +727,7 @@ def ui_home():
     for a,t in (('wifi','Wi-Fi'),('ap','Red de configuración'),('vpn','WireGuard'),('dns','Cloudflare DNS'),('usb','Cable USB'),
                 ('speed','Velocidad'),('res','Recursos'),('disp','Pantalla'),('logs:sys','Registros'),('sys','Sistema')):
         s.tile('nav:'+a,t,a.split(':')[0])
-    return s.gap().small(BRAND,'m')
+    return s.small(BRAND,'m').small(REPO,'m')
 
 def ui_wifi(arg):
     on=not (STATE/'wifi-off').exists()
@@ -891,7 +892,7 @@ def ui_sys(arg):
         s.label('Encendido: %dd %dh %dmin'%(up//86400,up%86400//3600,up%3600//60)).label('Carga: '+' '.join(load))
         s.label('RAM libre: %d / %d MB'%(mem.get('MemAvailable',mem.get('MemFree',0))//1024,mem['MemTotal']//1024))
     except (OSError,KeyError,ValueError):pass
-    s.label('Kernel '+os.uname().release,'m').small(BRAND,'m')
+    s.label('Kernel '+os.uname().release,'m').small(BRAND,'m').small(REPO,'m')
     s.button('nav:tz','Zona horaria: '+tz_name(),'i')
     s.button('nav:speed','Prueba de velocidad','i')
     return s.button('nav:reboot','Reiniciar J1','d','power').button('nav:poweroff','Apagar J1','d','power')
