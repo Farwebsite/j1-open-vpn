@@ -9,58 +9,81 @@ LOCK = threading.RLock()
 CSRF = secrets.token_hex(32)
 RUNTIME = {'vpn': 'Iniciando', 'ddns': 'Sin configurar', 'ddns6': 'Desactivado', 'upnp': 'Comprobando...', 'scan': 'Pulsa Buscar redes', 'networks': []}
 CSS = '''
-:root{--card:#1c1c1e;--field:#2c2c2e;--line:#38383a;--txt:#ebebf5;--mut:#8e8e93;--acc:#0a84ff;--grn:#30d158;--red:#ff453a;--yel:#ffd60a;color-scheme:dark}
-*{box-sizing:border-box}html{background:#000}
-body{margin:0 auto;max-width:640px;padding:0 14px 32px;scroll-behavior:smooth;background:#000;color:var(--txt);font:16px/1.45 Inter,-apple-system,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-text-size-adjust:100%}
-header{display:flex;align-items:center;height:60px;margin:0 -14px;padding:0 14px;border-bottom:1px solid var(--card)}
-h1{font-size:20px;font-weight:650;margin:0}
-.chips{display:flex;flex-direction:column;gap:8px;margin:14px 2px 16px}
-.chip{display:flex;align-items:center;gap:10px;font-size:17px;overflow-wrap:anywhere}
-.dot{width:10px;height:10px;border-radius:50%;background:var(--grn);flex:none}.dot.y{background:var(--yel)}
-nav{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-nav a{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;min-height:124px;padding:12px 6px;border-radius:20px;background:var(--card);color:var(--txt);text-decoration:none;font-size:16px;text-align:center}
-nav a:active{background:#3a3a3c}nav .ic{width:44px;height:44px}
-.ic{width:22px;height:22px;fill:currentColor;flex:none}
-main section{display:none}main section:target{display:block}body:has(main section:target) aside,body:not(:has(main section:target)) main>.notice{display:none}
-section{padding:0 0 12px;scroll-margin-top:0}
-h2{display:flex;align-items:center;gap:12px;height:60px;margin:0 -14px 6px;padding:0 14px;border-bottom:1px solid var(--card);font-size:20px;font-weight:650}
-h2 .tile{display:none}.back{color:var(--acc);text-decoration:none;font-size:36px;line-height:1;padding:0 8px 6px 0}
-section input,section select,section textarea,.sec,.btn2{background:var(--card)}
-.tile{width:36px;height:36px;border-radius:10px;background:var(--field);display:grid;place-items:center;flex:none}
-h3{font-size:16px;margin:22px 0 4px}
-p{margin:8px 0}a{color:var(--acc)}
-label{display:block;margin:14px 0 6px;font-size:14px;color:var(--mut)}
-input,select,textarea{width:100%;font:inherit;color:var(--txt);background:var(--field);border:1px solid transparent;border-radius:12px;padding:12px 14px;outline:none}
+:root{--bg:#000;--grp:#1c1c1e;--field:#2c2c2e;--sep:#38383a;--txt:#fff;--mut:#8e8e93;--acc:#0a84ff;--grn:#30d158;--red:#ff453a;--yel:#ffd60a;--ease:cubic-bezier(.32,.72,0,1);color-scheme:dark}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--txt);font:17px/1.35 -apple-system,BlinkMacSystemFont,"SF Pro Text",Inter,"Segoe UI",Roboto,system-ui,sans-serif;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%}
+a{color:var(--acc);text-decoration:none}p{margin:8px 0}h3{font-size:13px;font-weight:400;color:var(--mut);text-transform:uppercase;margin:24px 16px 6px}
+.ic{width:20px;height:20px;fill:currentColor;flex:none}
+.nt{width:29px;height:29px;border-radius:7px;display:grid;place-items:center;color:#fff;flex:none}.nt .ic{width:19px;height:19px}
+.group{background:var(--grp);border-radius:10px;overflow:hidden}
+.group>*{position:relative;display:flex;align-items:center;gap:14px;min-height:44px;padding:8px 16px;color:var(--txt)}
+.group>*+*::before{content:"";position:absolute;top:0;right:0;left:16px;border-top:.5px solid var(--sep)}
+nav.group>*+*::before{left:59px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--grn);flex:none}.dot.y{background:var(--yel)}
+.chev{margin-left:auto;color:#5a5a5e;font-size:22px;line-height:1}
+label{display:block;margin:16px 4px 6px;font-size:13px;color:var(--mut)}
+input,select,textarea{width:100%;font:inherit;color:var(--txt);background:var(--field);border:1px solid transparent;border-radius:10px;padding:11px 14px;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--acc)}input::placeholder,textarea::placeholder{color:#636366}
-label:has(input[type=checkbox]){display:flex;align-items:center;justify-content:space-between;flex-direction:row-reverse;gap:12px;color:var(--txt);font-size:16px;margin:16px 0}
-input[type=checkbox]{appearance:none;-webkit-appearance:none;position:relative;width:51px;height:31px;padding:0;border:0;border-radius:99px;background:#39393d;flex:none;cursor:pointer;transition:background .2s}
-input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:left .2s}
+label:has(input[type=checkbox]){display:flex;align-items:center;justify-content:space-between;flex-direction:row-reverse;gap:12px;color:var(--txt);font-size:17px;margin:12px 0}
+input[type=checkbox]{appearance:none;-webkit-appearance:none;position:relative;width:51px;height:31px;padding:0;border:0;border-radius:99px;background:#39393d;flex:none;cursor:pointer;transition:background .25s}
+input[type=checkbox]::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);transition:left .25s var(--ease)}
 input[type=checkbox]:checked{background:var(--grn)}input[type=checkbox]:checked::after{left:22px}
-button{display:block;width:100%;margin-top:16px;padding:13px;border:0;border-radius:12px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
-button:active{opacity:.75}.danger{background:#3a1616;color:var(--red)}.sec{background:var(--field);color:var(--txt)}
-small,.muted{color:var(--mut);font-size:13px}form small{display:block;margin-top:8px}
-.notice{border-radius:14px;padding:12px 14px;margin:14px 0 0;background:#10301c;color:var(--grn)}.notice.err,p.err{color:var(--red)}.notice.err{background:#3a1616}
-details{margin:12px 0}summary{cursor:pointer;color:var(--acc)}
-code{background:var(--field);padding:2px 6px;border-radius:6px;font-size:14px;overflow-wrap:anywhere}
-.list{list-style:none;padding:0;margin:6px 0}.list li{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}.list li:first-child{border-top:0}
-.list .who{flex:1;min-width:0;overflow-wrap:anywhere}.list .who small{display:block}.list form{margin:0}
-.btn2{display:inline-flex;align-items:center;gap:6px;padding:9px 12px;border-radius:12px;background:var(--field);color:var(--txt);text-decoration:none;font-weight:600;font-size:14px}.btn2 .ic{width:18px;height:18px}
-.list button{width:auto;margin:0;padding:9px 12px;font-size:14px}
-footer{color:var(--mut);font-size:13px;text-align:center;margin:26px 6px 0}footer a{color:var(--mut)}footer p{margin:6px 0}
-@media(max-width:380px){body{padding:0 10px 28px}header,h2{margin:0 -10px 6px;padding:0 10px}nav{gap:10px}nav a{min-height:112px}}
-@media(min-width:900px){body{max-width:1240px;padding:0 24px 32px}
-.app{display:grid;grid-template-columns:250px 1fr;gap:28px;align-items:start}
-aside,body:has(main section:target) aside{display:block;position:sticky;top:0;max-height:100vh;overflow-y:auto;padding-bottom:20px}
-header{display:block;height:auto;margin:0;padding:26px 4px 8px;border:0}h1{font-size:22px}
-.chips{align-items:flex-start;margin:12px 0}.chip{background:var(--card);border-radius:99px;padding:5px 12px;font-size:13px;gap:7px}.dot{width:8px;height:8px}
-nav{display:flex;flex-direction:column;gap:2px;margin-top:10px}
-nav a{flex-direction:row;justify-content:flex-start;gap:12px;min-height:0;padding:10px 12px;border-radius:12px;background:none;font-size:15px}
-nav a:hover{background:var(--card)}nav .ic{width:22px;height:22px}
-main{padding-top:12px;columns:2 400px;column-gap:16px}main>.notice,body:not(:has(main section:target)) main>.notice{display:block;column-span:all;margin:12px 0 4px}aside>.notice{display:none}
-main section,main section:target{display:inline-block;width:100%;margin:0 0 16px;break-inside:avoid;background:var(--card);border-radius:20px;padding:18px 18px 20px;scroll-margin-top:12px}
-h2{height:auto;margin:0 0 12px;padding:0;border:0;font-size:19px}h2 .tile{display:grid}.back{display:none}
-section input,section select,section textarea,.sec,.btn2{background:var(--field)}
-footer{margin-left:278px}}
+button{display:block;width:100%;margin-top:16px;padding:12px;border:0;border-radius:12px;background:var(--acc);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button:active{opacity:.7}.sec{background:var(--field);color:var(--acc)}.danger{background:var(--field);color:var(--red)}
+small,.muted{color:var(--mut);font-size:13px}form small{display:block;margin:8px 4px 0}
+section>p{margin:12px 4px}section form{background:var(--grp);border-radius:12px;padding:2px 16px 16px;margin:12px 0}
+details{margin:12px 4px}summary{cursor:pointer;color:var(--acc)}
+code{background:var(--field);padding:1px 6px;border-radius:6px;font-size:.85em;overflow-wrap:anywhere}
+.list{list-style:none;padding:0;margin:8px 0;background:var(--grp);border-radius:12px;overflow:hidden}
+.list li{position:relative;display:flex;align-items:center;gap:12px;padding:10px 16px}.list li+li::before{content:"";position:absolute;top:0;right:0;left:59px;border-top:.5px solid var(--sep)}
+.list .who{flex:1;min-width:0;overflow-wrap:anywhere}.list .who small{display:block}.list form{margin:0;padding:0;background:none}
+.list .tile{width:29px;height:29px;border-radius:7px;display:grid;place-items:center;background:var(--field)}
+.btn2{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;background:var(--field);color:var(--acc);font-weight:600;font-size:15px}.btn2 .ic{width:17px;height:17px}
+.list button{width:auto;margin:0;padding:7px 12px;border-radius:99px;font-size:15px}
+.notice{position:fixed;z-index:30;top:10px;left:50%;width:min(92vw,420px);margin:0;padding:13px 16px;border-radius:16px;background:rgba(44,44,46,.92);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);color:var(--txt);font-size:15px;box-shadow:0 10px 30px rgba(0,0,0,.5);transform:translate(-50%,0);animation:toast 6s var(--ease) forwards;pointer-events:none}
+.notice::before{content:"\\2713";color:var(--grn);font-weight:700;margin-right:8px}.notice.err::before{content:"!";color:var(--red)}.notice.err{animation-duration:10s}
+p.err{color:var(--red);margin:12px 4px}
+@keyframes toast{0%{transform:translate(-50%,-140%)}8%,88%{transform:translate(-50%,0)}100%{transform:translate(-50%,-140%);visibility:hidden}}
+footer{color:var(--mut);font-size:12px;text-align:center;padding:24px 16px 34px}footer a{color:var(--mut)}footer p{margin:4px 0}
+.tile{display:none}
+/* iPhone: Settings-like list; a section slides in from the right and back out */
+@media(max-width:899px){
+html,body{overflow-x:hidden}
+.root{padding:0 16px;transition:transform .45s var(--ease),filter .45s}
+body:has(main section:target) .root{transform:translateX(-28%);filter:brightness(.6);pointer-events:none}
+header{padding:52px 4px 10px}h1{font-size:34px;font-weight:700;letter-spacing:.2px;margin:0}
+.chips{margin:14px 0 26px}
+main section{position:fixed;inset:0;z-index:10;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch;padding:0 16px 40px;transform:translateX(100%);visibility:hidden;box-shadow:-10px 0 30px rgba(0,0,0,.6);transition:transform .45s var(--ease),visibility 0s .45s}
+main section:target{transform:none;visibility:visible;transition:transform .45s var(--ease),visibility 0s}
+h2{position:sticky;top:0;z-index:2;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;height:50px;margin:0 -16px 4px;padding:0 8px;background:rgba(0,0,0,.82);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:.5px solid var(--sep);font-size:17px;font-weight:600;text-align:center;white-space:nowrap}
+.back{justify-self:start;font-size:17px;font-weight:400;padding:8px}.back::before{content:"\\2039";font-size:32px;line-height:0;vertical-align:-5px;margin-right:5px}
+}
+/* Mac: a System Settings window, sidebar + one section at a time */
+@media(min-width:900px){
+body{min-height:100vh;padding:40px 24px;font-size:13px;background:radial-gradient(1200px 700px at 20% 0,#2b3a67 0,transparent 60%),radial-gradient(900px 600px at 100% 100%,#4a2a5e 0,transparent 55%),#111}
+.app{display:grid;grid-template-columns:250px 1fr;max-width:1080px;height:calc(100vh - 80px);min-height:600px;margin:0 auto;border-radius:12px;overflow:hidden;background:#1e1e1e;border:1px solid #444;box-shadow:0 30px 90px rgba(0,0,0,.65)}
+.root{position:relative;overflow-y:auto;padding:52px 10px 12px;background:rgba(50,50,52,.82);-webkit-backdrop-filter:blur(40px);backdrop-filter:blur(40px);border-right:1px solid #000}
+.root::before{content:"";position:absolute;top:18px;left:20px;width:12px;height:12px;border-radius:50%;background:#ff5f57;box-shadow:20px 0 #febc2e,40px 0 #28c840}
+header{padding:0 10px 6px}h1{font-size:15px;font-weight:700;margin:0}
+.chips{background:none;margin:4px 0 14px}.chips>*{min-height:22px;padding:2px 10px;font-size:12px;color:var(--mut);gap:8px}.chips>*::before{display:none}.dot{width:7px;height:7px}
+nav.group{background:none;border-radius:0}nav.group>*{min-height:30px;padding:4px 10px;gap:9px;border-radius:7px;font-size:13px}nav.group>*::before{display:none}
+nav a:hover{background:rgba(255,255,255,.06)}.nt{width:21px;height:21px;border-radius:5px}.nt .ic{width:14px;height:14px}.chev{display:none}
+main{overflow-y:auto;padding:0 32px 30px;background:#1e1e1e}
+main section{display:none}main section:target,main:not(:has(section:target)) #wifi{display:block}
+h2{position:sticky;top:0;z-index:2;display:flex;align-items:center;height:52px;margin:0 -32px 14px;padding:0 32px;background:rgba(30,30,30,.9);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);border-bottom:1px solid #000;font-size:15px;font-weight:700}
+.back{display:none}
+label{font-size:12px;margin:12px 2px 5px}label:has(input[type=checkbox]){font-size:13px}
+input,select,textarea{font-size:13px;padding:6px 10px;border-radius:6px;background:#2a2a2c;border:1px solid #3a3a3c}
+input:focus,select:focus,textarea:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(10,132,255,.35)}
+input[type=checkbox]{width:38px;height:22px}input[type=checkbox]::after{width:18px;height:18px}input[type=checkbox]:checked::after{left:18px}
+button{display:inline-block;width:auto;min-width:96px;margin:14px 0 0;padding:5px 16px;border-radius:6px;font-size:13px;font-weight:500;box-shadow:0 1px 1px rgba(0,0,0,.3),inset 0 .5px 0 rgba(255,255,255,.25)}
+.sec,.danger{background:#5a5a5e;color:#fff}.danger{color:#ff6961}
+section>p{margin:10px 2px}section form{background:#2a2a2c;border:1px solid #333336;border-radius:10px;padding:2px 16px 14px;margin:12px 0}
+small,.muted{font-size:12px}h3{font-size:11px;margin:20px 2px 6px}
+.list{background:#2a2a2c;border:1px solid #333336;border-radius:10px}.list li{padding:8px 14px}.list button,.btn2{font-size:12px;padding:4px 10px;border-radius:6px}.btn2{background:#5a5a5e;color:#fff}
+.notice{top:52px;font-size:13px}
+footer{padding:14px}
+}
 '''.replace('\n','')
 # ---- icons: generated by rootfs/display/gen-font.py from Material Icons (Apache 2.0)
 ICONS_SVG={
@@ -81,6 +104,7 @@ ICONS_SVG={
 SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('usb','Cable','cable','#bf5af2'),('vpn','WireGuard','vpn','#ff9f0a'),
           ('dns','Cloudflare','dns','#0a84ff'),('clave','Contraseña','key','#5ac8fa'),('red','Red J1','ap','#64d2ff'),
           ('pantalla','Bloqueo','lock','#98989d'),('hora','Hora','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'))
+CSS+=''.join('body:has(#%s:target) nav a[href="#%s"]%s{background:#0a64d9}'%(sid,sid,',body:not(:has(main section:target)) nav a[href="#wifi"]' if sid=='wifi' else '') for sid,_,_,_ in SECTIONS).join(('@media(min-width:900px){','}'))
 def icon(name,color=''):
     return ('<svg class=ic viewBox="0 -512 512 512" aria-hidden=true'+(' style="color:'+color+'"' if color else '')+
             '><path transform="scale(1 -1)" d="'+ICONS_SVG[name]+'"/></svg>')
@@ -88,7 +112,7 @@ def with_icons(body):
     # '<section id=x><h2>' gets the tile of section x and the back arrow (phone);
     # its forms post to '#x' so the answer opens on the same section
     for sid,_,ic,color in SECTIONS:
-        body=body.replace('<section id='+sid+'><h2>','<section id='+sid+'><h2><a class=back href="#top" aria-label=Volver>&#8249;</a><span class=tile>'+icon(ic,color)+'</span>',1)
+        body=body.replace('<section id='+sid+'><h2>','<section id='+sid+'><h2><a class=back href="#top">J1</a>',1)
         a=body.find('<section id='+sid+'>')
         if a>=0:
             b=body.find('</section>',a)
@@ -544,10 +568,10 @@ def page(message='',error=False):
     note='<p class="notice'+(' err' if error else '')+'" role=status>'+esc(message)+'</p>'
     vpn_ok=RUNTIME['vpn'].startswith('Activo');wifi_ok=bool(re.search(r'\d+\.\d+\.\d+\.\d+',wifi))
     out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=theme-color content="#000000"><title>J1 VPN</title><style>'+CSS+'</style>'
-         '<div class=app id=top><aside><header><h1>J1 · Servidor VPN</h1></header>'+(note if message else '')+'<div class=chips><span class=chip><span class="dot'+('' if vpn_ok else ' y')+'"></span>'+esc(RUNTIME['vpn'])+'</span>'
+         '<div class=app id=top><aside class=root><header><h1>J1 · Servidor VPN</h1></header><div class="chips group"><span class=chip><span class="dot'+('' if vpn_ok else ' y')+'"></span>'+esc(RUNTIME['vpn'])+'</span>'
          '<span class=chip><span class="dot'+('' if wifi_ok else ' y')+'"></span>'+esc(wifi)+'</span>'
-         '<span class=chip><span class="dot'+('' if RUNTIME['ddns'].startswith('Actualizado') else ' y')+'"></span>DNS: '+esc(RUNTIME['ddns'])+'</span></div><nav>'+
-         ''.join('<a href="#'+sid+'">'+icon(ic,color)+esc(name)+'</a>' for sid,name,ic,color in SECTIONS)+
+         '<span class=chip><span class="dot'+('' if RUNTIME['ddns'].startswith('Actualizado') else ' y')+'"></span>DNS: '+esc(RUNTIME['ddns'])+'</span></div><nav class=group>'+
+         ''.join('<a href="#'+sid+'"><span class=nt style="background:'+color+'">'+icon(ic)+'</span>'+esc(name)+'<span class=chev>&#8250;</span></a>' for sid,name,ic,color in SECTIONS)+
          '</nav></aside><main>'+(note if message else '')]
     out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button class=sec>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
