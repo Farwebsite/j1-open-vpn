@@ -152,29 +152,37 @@ class Tests(unittest.TestCase):
   self.assertIn(b'C\tnav:panel\tPanel web\tpanel\n',app.ui_request(b'a=nav%3Ahome'))
  def test_lock_code(self):
   app.PIN_FAIL.update(n=0,until=0.0)
-  self.assertIn(b'\nK\t1\t0\n',app.ui_request(b'a=nav%3Adisp'))
+  self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=nav%3Adisp'))
   self.assertIn(b'\te\n',app.ui_request(b'a=disp.pin&s=disp&f_pin=12&f_pin2=12'));self.assertIsNone(app.display_pin())
   self.assertIn(b'no coinciden',app.ui_request(b'a=disp.pin&s=disp&f_pin=1234&f_pin2=1235'))
-  out=app.ui_request(b'a=disp.pin&s=disp&f_pin=2468&f_pin2=2468');self.assertIn(b'\nK\t1\t1\n',out)
+  out=app.ui_request(b'a=disp.pin&s=disp&f_pin=2468&f_pin2=2468');self.assertIn(b'\nK\t1\t1\t0\n',out)
   self.assertNotIn('2468',app.json.dumps(app.load('display.json',{})))
   self.assertNotIn(b'\te\n',app.ui_request(b'a=lock.try&s=home&f_pin=2468'))
   for i in range(4):self.assertIn(b'incorrecto',app.ui_request(b'a=lock.try&s=home&f_pin=1111'))
-  self.assertIn(b'Espera 30 s',app.ui_request(b'a=lock.try&s=home&f_pin=1111'))
+  self.assertIn(b'Espera 30 s (quedan 5',app.ui_request(b'a=lock.try&s=home&f_pin=1111'))
   self.assertIn(b'Demasiados intentos',app.ui_request(b'a=lock.try&s=home&f_pin=2468'))   # even the right one waits
-  app.PIN_FAIL['until']=0.0;self.assertNotIn(b'\te\n',app.ui_request(b'a=lock.try&s=home&f_pin=2468'))
+  self.assertEqual(app.load('pin-fail.json',{}),{'n':5})   # survives a reboot
+  app.PIN_FAIL.update(n=0,until=0.0);app.pin_fail_load();self.assertEqual(app.PIN_FAIL['n'],5);self.assertGreater(app.PIN_FAIL['until'],0)
+  for i in range(5):
+   app.PIN_FAIL['until']=0.0;out=app.ui_request(b'a=lock.try&s=home&f_pin=1111')
+  self.assertIn(b'Pantalla bloqueada tras 10',out);self.assertIn(b'\nK\t1\t1\t1\n',out);self.assertTrue(app.pin_blocked())
+  app.PIN_FAIL['until']=0.0;self.assertIn(b'bloqueada',app.ui_request(b'a=lock.try&s=home&f_pin=2468'))   # not even the right one
+  app.pin_fail_load();self.assertTrue(app.pin_blocked())
+  self.assertIn('lockunblock',app.lock_section());app.pin_unblock();self.assertFalse(app.pin_blocked())
+  self.assertNotIn(b'\te\n',app.ui_request(b'a=lock.try&s=home&f_pin=2468'));self.assertFalse((app.STATE/'pin-fail.json').exists())
   app.display_save(timeout=15);self.assertIsNotNone(app.display_pin())   # other settings keep the code
   self.assertIn('lockpinoff',app.lock_section())
   self.assertIn(b'y c\xa2digo quitado',app.ui_request(b'a=disp.lock%3A0&s=disp'));self.assertIsNone(app.display_pin())
   app.ui_request(b'a=disp.lock%3A1&s=disp');app.ui_request(b'a=disp.pin&s=disp&f_pin=13579&f_pin2=13579')
-  self.assertIn(b'\nK\t1\t0\n',app.ui_request(b'a=disp.pinoff&s=disp'));self.assertIsNone(app.display_pin())
+  self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=disp.pinoff&s=disp'));self.assertIsNone(app.display_pin())
  def test_lock_screen(self):
-  out=app.ui_request(b'a=nav%3Adisp&s=home');self.assertTrue(app.display_lock());self.assertIn(b'\nK\t1\t0\n',out)
+  out=app.ui_request(b'a=nav%3Adisp&s=home');self.assertTrue(app.display_lock());self.assertIn(b'\nK\t1\t0\t0\n',out)
   self.assertIn(b'\nS\tdisp.lock:0\tPantalla de bloqueo\t1\n',out)
-  out=app.ui_request(b'a=disp.lock%3A0&s=disp');self.assertIn(b'\nK\t0\t0\n',out);self.assertFalse(app.display_lock())
+  out=app.ui_request(b'a=disp.lock%3A0&s=disp');self.assertIn(b'\nK\t0\t0\t0\n',out);self.assertFalse(app.display_lock())
   self.assertIn(b'\te\n',app.ui_request(b'a=disp.lock%3A7&s=disp'));self.assertFalse(app.display_lock())
   app.display_save(timeout=15);self.assertFalse(app.display_lock());self.assertEqual(app.display_timeout(),15)
   self.assertIn('value=1><button>Activar',app.lock_section())
-  app.display_save(lock=True);self.assertIn(b'\nK\t1\t0\n',app.ui_request(b'a=nav%3Ahome&s=home'))
+  app.display_save(lock=True);self.assertIn(b'\nK\t1\t0\t0\n',app.ui_request(b'a=nav%3Ahome&s=home'))
 
  def test_resources_screen_measures_between_visits(self):
   app.RES_PREV.clear();first=app.ui_request(b'a=nav%3Ares');self.assertIn(b'Midiendo',first)

@@ -183,7 +183,7 @@ static int busy, shown = 1, wakes;
 static int lock_on, locked, lock_drag, lock_x;
 /* optional code (K line, 3rd field): after the swipe a keypad asks for it;
  * web.py checks it (the J1 keeps only a hash) and limits the attempts */
-static int lock_pin, lock_stage, pin_down = -1;
+static int lock_pin, lock_blocked, lock_stage, pin_down = -1;   /* blocked: too many misses, only the web panel opens it */
 static char pin_buf[9], pin_msg[80];
 
 static uint32_t tcolor(const char *c) {
@@ -266,7 +266,7 @@ static void parse(int keep_dirty) {
 			if (v < 13 || v > 255) v = 143;
 			if (v != bright) { bright = v; if (shown && !dimmed) set_bright(); }
 		}
-		else if (fld[0][0] == 'K') { lock_on = fld[1] && *fld[1] == '1'; lock_pin = lock_on && fld[2] && *fld[2] == '1'; if (!lock_on) locked = 0; }
+		else if (fld[0][0] == 'K') { lock_on = fld[1] && *fld[1] == '1'; lock_pin = lock_on && fld[2] && *fld[2] == '1'; lock_blocked = lock_pin && fld[3] && *fld[3] == '1'; if (!lock_on) locked = 0; }
 		else if (fld[0][0] && (fld[1] || fld[0][0] == 'G')) {
 			struct el *e = &els[nel++]; memset(e, 0, sizeof *e);
 			e->t = fld[0][0]; e->a = fld[1] ? fld[1] : (char *)""; e->b = fld[2]; e->c = fld[3]; e->d = fld[4];
@@ -394,11 +394,18 @@ static int pin_key_at(int x, int y) {
 }
 static char pin_key_char(int k) { return k < 9 ? (char)('1' + k) : k == 9 ? '<' : k == 10 ? '0' : '>'; }
 static void render_pin(void) {
+	if (lock_blocked) {
+		icon_sz(SW / 2 - 23, 150, icon_id("lock"), 1, C_RED);
+		text_mid(SW / 2, 220, "Pantalla bloqueada", 2, C_RED);
+		wrap2("Demasiados c\xa2" "digos err\xa2" "neos. Desbloqu\x82" "ala desde el panel web (Pantalla de bloqueo).", PAD + 20, 280, SW - 2 * PAD - 40, 2, C_TXT, 1, 1);
+		text_mid(SW / 2, SH - 70, "Cancelar", 2, C_ACC);
+		return;
+	}
 	text_mid(SW / 2, 90, "Introduce el c\xa2" "digo", 2, C_WHITE);
 	int n = (int)strlen(pin_buf), dx = SW / 2 - (n * 30 - 14) / 2;
 	for (int i = 0; i < n; i++) rrect(dx + i * 30, 160, 16, 16, 8, C_WHITE);
 	if (!n) text_mid(SW / 2, 152, "4 a 8 cifras", 1, C_MUT);
-	if (pin_msg[0]) text_mid(SW / 2, 205, pin_msg, 1, C_RED);
+	if (pin_msg[0]) wrap2(pin_msg, PAD, 196, SW - 2 * PAD, 1, C_RED, 1, 1);
 	for (int k = 0; k < 12; k++) {
 		int cx, cy; pin_key_pos(k, &cx, &cy); char c = pin_key_char(k), s[2] = {c, 0};
 		uint32_t bg = k == pin_down ? C_DOWN : c == '>' ? C_ACC : C_ITM;
@@ -665,11 +672,20 @@ static void resume(void) {
 	char nav[160]; snprintf(nav, sizeof nav, "nav:%s", strncmp(screen_id, "qr", 2) && strncmp(screen_id, "wifiqr", 6) && strcmp(screen_id, "power") ? screen_id : "home");
 	send_action(nav, 0);
 }
+/* lock state from the K line of a reply, without touching the current screen */
+static void scan_k(void) {
+	char *k = strstr(resp, "\nK\t"); if (!k) return;
+	char line[32]; int n = (int)strcspn(k + 1, "\n"); snprintf(line, sizeof line, "%.*s", n, k + 1);
+	lock_pin = line[2] == '1' && line[3] == '\t' && line[4] == '1';
+	lock_blocked = lock_pin && line[5] == '\t' && line[6] == '1';
+}
+static void pin_state(void) { if (request("a=lock.state&s=home") == 0) scan_k(); }
 /* web.py checks the code; its error message (wrong, too many tries) is shown */
 static int pin_check(void) {
 	char q[96]; snprintf(q, sizeof q, "a=lock.try&s=home&f_pin=%s", pin_buf);
 	busy_pending = 1; int ok = request(q) == 0; busy = busy_pending = 0;
 	if (!ok) { snprintf(pin_msg, sizeof pin_msg, "Sin respuesta; vuelve a intentarlo"); return 0; }
+	scan_k();
 	if (!has_error()) return 1;
 	char *m = strstr(resp, "\nM\t"); pin_msg[0] = 0;
 	if (m) { m += 3; int n = (int)strcspn(m, "\t\n"); snprintf(pin_msg, sizeof pin_msg, "%.*s", n, m); }
@@ -678,7 +694,7 @@ static int pin_check(void) {
 static void pin_tap(int x, int y, int y0) {
 	int k = pin_down; pin_down = -1;
 	if (y0 > SH - 110 && y > SH - 110) { lock_stage = 0; pin_buf[0] = pin_msg[0] = 0; render(); return; }   /* Cancelar */
-	if (k < 0 || k != pin_key_at(x, y)) { render(); return; }
+	if (lock_blocked || k < 0 || k != pin_key_at(x, y)) { render(); return; }
 	char c = pin_key_char(k); int n = (int)strlen(pin_buf);
 	if (c >= '0' && c <= '9' && n < 8) { pin_buf[n] = c; pin_buf[n + 1] = 0; pin_msg[0] = 0; }
 	else if (c == '<' && n) pin_buf[n - 1] = 0;
@@ -803,7 +819,7 @@ static void touch_up(int x, int y) {
 		int open = lock_drag && lock_x >= lock_range() * 9 / 10;
 		if (debug) fprintf(stderr, "%.3f bloqueo: arrastre %d de %d%s\n", now(), lock_x, lock_range(), open ? (lock_pin ? " -> pide el codigo" : " -> desbloqueada") : "");
 		lock_drag = lock_x = 0;
-		if (open && lock_pin) { lock_stage = 1; pin_buf[0] = pin_msg[0] = 0; render(); }
+		if (open && lock_pin) { pin_state(); lock_stage = 1; pin_buf[0] = pin_msg[0] = 0; if (!lock_pin) { locked = lock_stage = 0; resume(); } else render(); }
 		else if (open) { locked = 0; resume(); } else render();
 		return;
 	}

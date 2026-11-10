@@ -419,6 +419,7 @@ def ssh_disable():
 def lock_section():
     on=display_lock();pin=on and display_pin() is not None
     return ('<section id=pantalla><h2>Pantalla de bloqueo</h2><p>'+('Activada' if on else 'Desactivada')+(' · con código' if pin else '')+'</p>'+
+        ('<p class=err>Bloqueada tras %d códigos erróneos: la pantalla no acepta ningún código.</p><form method=post>'%PIN_FAIL['n']+hidden()+'<input type=hidden name=action value=lockunblock><button>Desbloquear la pantalla</button></form>' if pin and pin_blocked() else '')+
         ('<form method=post>'+hidden()+'<input type=hidden name=action value=lockpinoff><button class=danger>Quitar el código de desbloqueo</button><small>Por si se ha olvidado; se vuelve a poner desde la pantalla (Pantalla de bloqueo).</small></form>' if pin else '')+'<p class=muted>Activada: cuando la pantalla del J1 se apaga, tocarla solo enciende el reloj y hay que deslizar para usarla, así no se pulsa nada sin querer.</p><form method=post>'+hidden()+
         '<input type=hidden name=action value=lock><input type=hidden name=on value='+('0' if on else '1')+'><button>'+('Desactivar' if on else 'Activar')+' pantalla de bloqueo</button></form></section>')
 def tz_section():
@@ -545,6 +546,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 key=ssh_generate()
                 self.respond(key,content='application/octet-stream',filename='j1-open-vpn-ssh-key');return
             elif action=='sshadd':ssh_add(f.get('key',''));message='Clave añadida. Ya puedes entrar por USB: ssh root@192.168.77.1'
+            elif action=='lockunblock':pin_unblock();message='Pantalla desbloqueada: vuelve a aceptar el código.'
             elif action=='lockpinoff':pin_clear();message='Código de desbloqueo quitado.'
             elif action=='lock':display_save(lock=f.get('on')=='1');message='Pantalla de bloqueo '+('activada.' if display_lock() else 'desactivada.')
             elif action=='tz':message='Zona horaria: '+tz_set(f.get('zone',''))
@@ -711,7 +713,26 @@ def display_lock():
 # optional unlock code: only a salted PBKDF2 hash is kept; it needs the lock
 # screen, so turning that off forgets the code
 PIN_ITER=20000
+# misses in a row are kept on disk (a reboot does not reset them): from the
+# 5th one the screen waits 30 s, doubling; at PIN_MAX it stops taking codes
+# until the web panel (admin password) unblocks it
+PIN_MAX=10
 PIN_FAIL={'n':0,'until':0.0}
+def pin_wait(n):return 30*2**(n-5) if n>=5 else 0
+def pin_fail_load():
+    try:n=int(load('pin-fail.json',{}).get('n',0))
+    except (TypeError,ValueError):n=0
+    PIN_FAIL.update(n=n,until=time.monotonic()+pin_wait(n) if n<PIN_MAX else 0.0)   # after a reboot the wait starts again
+def pin_fail_save(n):
+    PIN_FAIL['n']=n
+    if n:save('pin-fail.json',{'n':n})
+    else:
+        PIN_FAIL['until']=0.0
+        try:(STATE/'pin-fail.json').unlink()
+        except FileNotFoundError:pass
+def pin_blocked():return display_pin() is not None and PIN_FAIL['n']>=PIN_MAX
+def pin_unblock():
+    pin_fail_save(0);log('Pantalla de bloqueo desbloqueada desde el panel web')
 def display_pin():
     p=load('display.json',{}).get('pin')
     return p if isinstance(p,dict) and 'salt' in p and 'hash' in p else None
@@ -719,21 +740,25 @@ def pin_hash(pin,salt):return hashlib.pbkdf2_hmac('sha256',pin.encode(),bytes.fr
 def pin_set(pin,again):
     if not re.fullmatch(r'\d{4,8}',pin or ''):raise ValueError('El código debe tener de 4 a 8 cifras')
     if pin!=again:raise ValueError('Los dos códigos no coinciden')
-    salt=secrets.token_hex(16);display_save(lock=True,pin={'salt':salt,'hash':pin_hash(pin,salt)});log('Código de la pantalla de bloqueo puesto')
+    salt=secrets.token_hex(16);display_save(lock=True,pin={'salt':salt,'hash':pin_hash(pin,salt)});pin_fail_save(0);log('Código de la pantalla de bloqueo puesto')
 def pin_clear():
-    display_save(pin=None);log('Código de la pantalla de bloqueo quitado')
+    display_save(pin=None);pin_fail_save(0);log('Código de la pantalla de bloqueo quitado')
 def pin_try(pin):
-    """Checks a code typed on the lock screen; 5 misses in a row: wait 30 s, doubling."""
+    """Checks a code typed on the lock screen (see PIN_MAX)."""
     p=display_pin()
     if not p:return
+    if pin_blocked():raise ValueError('Pantalla bloqueada tras %d códigos erróneos. Desbloquéala desde el panel web.'%PIN_MAX)
     wait=PIN_FAIL['until']-time.monotonic()
     if wait>0:raise ValueError('Demasiados intentos: espera %d s'%(wait+1))
-    if hmac.compare_digest(pin_hash(pin or '',p['salt']),p['hash']):PIN_FAIL.update(n=0,until=0.0);return
-    PIN_FAIL['n']+=1;n=PIN_FAIL['n']
+    if hmac.compare_digest(pin_hash(pin or '',p['salt']),p['hash']):pin_fail_save(0);return
+    n=PIN_FAIL['n']+1;pin_fail_save(n)
+    if n>=PIN_MAX:
+        log('Pantalla de bloqueo: BLOQUEADA tras %d códigos erróneos'%n)
+        raise ValueError('Pantalla bloqueada tras %d códigos erróneos. Desbloquéala desde el panel web.'%n)
     if n>=5:
-        PIN_FAIL['until']=time.monotonic()+min(30*2**(n-5),3600)
+        PIN_FAIL['until']=time.monotonic()+pin_wait(n)
         log('Pantalla de bloqueo: %d códigos erróneos seguidos'%n)
-        raise ValueError('Código incorrecto. Espera %d s'%min(30*2**(n-5),3600))
+        raise ValueError('Código incorrecto. Espera %d s (quedan %d intentos)'%(pin_wait(n),PIN_MAX-n))
     raise ValueError('Código incorrecto')
 def display_save(**kw):
     conf={'timeout':display_timeout(),'brightness':display_brightness(),'lock':display_lock(),'pin':display_pin()};conf.update(kw)
@@ -1133,6 +1158,7 @@ def ui_action(a, f):
     if verb=='disp.pin':pin_set(f.get('pin',''),f.get('pin2',''));return 'disp','Código puesto: se pedirá al desbloquear'
     if verb=='disp.pinoff':pin_clear();return 'disp','Código quitado'
     if verb=='lock.try':pin_try(f.get('pin',''));return 'home',None
+    if verb=='lock.state':return 'home',None
     if verb=='disp.bright':
         b=int(arg) if arg.isdigit() else -1
         if not BRIGHT_MIN<=b<=255:raise ValueError('Brillo no válido')
@@ -1161,7 +1187,8 @@ def ui_request(raw):
     except (ValueError,RuntimeError) as e:s=ui_home();msg,kind=str(e),'e'
     if msg:s.msg(msg,kind)
     s.rows.insert(1,['O',str(display_timeout())]);s.rows.insert(1,['V',str(display_brightness())])
-    s.rows.insert(1,['K','1' if display_lock() else '0','1' if display_lock() and display_pin() else '0'])
+    pin=display_lock() and display_pin() is not None
+    s.rows.insert(1,['K','1' if display_lock() else '0','1' if pin else '0','1' if pin and pin_blocked() else '0'])
     return s.encode()
 
 class UIHandler(socketserver.StreamRequestHandler):
@@ -1296,6 +1323,7 @@ def worker():
 
 def main():
     os.umask(0o077);STATE.mkdir(parents=True,exist_ok=True);RUN.mkdir(parents=True,exist_ok=True)
+    pin_fail_load()
     ensure_vpn_state();apply_usb();threading.Thread(target=worker,daemon=True).start()
     threading.Thread(target=ui_serve,daemon=True).start()
     threading.Thread(target=panel_serve,daemon=True).start()
