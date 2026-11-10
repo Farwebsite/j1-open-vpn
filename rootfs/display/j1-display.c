@@ -162,12 +162,15 @@ static void icon(int x, int y, int n, uint32_t c) { icon_sz(x + 1, y + 1, n, 0, 
 static uint32_t icon_color(const char *name);
 
 /* ---- screen model ---- */
-struct el { char t, *a, *b, *c, *d; int y, h, dirty, col; char val[160]; };
+struct el { char t, *a, *b, *c, *d; int y, h, dirty, col, pg; char val[160]; };
 /* home tiles (C): two per row */
 #define TGAP 12
-#define TILE_H 140
+#define TILE_H 136
 static int tile_w(void) { return (SW - 2 * PAD - TGAP) / 2; }
-static int tile_x(const struct el *e) { return PAD + e->col * (tile_w() + TGAP); }
+/* the tiles go in pages swiped sideways; page_dx = finger offset while dragging */
+#define DOTS_H 30
+static int page, npages = 1, page_dx, tiles_y, tiles_h;
+static int tile_x(const struct el *e) { return PAD + e->col * (tile_w() + TGAP) + (e->pg - page) * SW + page_dx; }
 static struct el els[MAXEL];
 static int nel, content_h, scroll, refresh_s, idle_s = 60;
 static void set_deadline(void), set_bright(void);
@@ -194,12 +197,24 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 }
 static void layout(void) {
 	int y = 8, w = SW - 2 * PAD;
+	npages = 1; tiles_h = 0;
 	for (int i = 0; i < nel; i++) {
-		struct el *e = &els[i]; e->y = y; e->h = 0; e->col = 0;
-		/* second tile of a row: same line as the first */
-		if (e->t == 'C' && i && els[i - 1].t == 'C' && !els[i - 1].col) { e->col = 1; e->y = els[i - 1].y; e->h = els[i - 1].h; continue; }
+		struct el *e = &els[i]; e->y = y; e->h = 0; e->col = e->pg = 0;
+		if (e->t == 'C') {   /* a run of tiles: as many rows as fit below, the rest on more pages */
+			int n = 0; while (i + n < nel && els[i + n].t == 'C') n++;
+			int rows = (SH - TOP - y - DOTS_H - 8) / (TILE_H + TGAP); if (rows < 1) rows = 1;
+			npages = (n + 2 * rows - 1) / (2 * rows);
+			if (npages == 1) rows = (n + 1) / 2;
+			for (int k = 0; k < n; k++) {
+				struct el *t = &els[i + k];
+				t->pg = k / (2 * rows); t->col = k % 2; t->y = y + (k % (2 * rows)) / 2 * (TILE_H + TGAP); t->h = TILE_H + TGAP;
+			}
+			tiles_y = y; tiles_h = rows * (TILE_H + TGAP);
+			y += tiles_h + (npages > 1 ? DOTS_H : 0); i += n - 1;
+			if (page >= npages) page = npages - 1;
+			continue;
+		}
 		switch (e->t) {
-		case 'C': e->h = TILE_H + TGAP; break;
 		case 'M': e->h = wrap(e->a, 0, 0, w - 16, 2, 0, 0) + 20; break;
 		case 'L': { char k = e->b ? *e->b : 'n'; int dot = k == 'g' || k == 'y' || k == 'r';   /* same width as when drawn */
 			e->h = wrap(e->a, 0, 0, dot ? w - 26 : w, 2, 0, 0) + 6; break; }
@@ -256,7 +271,7 @@ static void parse(int keep_dirty) {
 		p = nl + 1;
 	}
 	int same = !strcmp(old, screen_id);
-	if (!same) scroll = 0;
+	if (!same) scroll = page = page_dx = 0;
 	if (same && keep_dirty)
 		for (int i = 0; i < nel; i++) if (els[i].t == 'F')
 			for (int k = 0; k < nk; k++) if (!strcmp(kn[k], els[i].a)) { snprintf(els[i].val, sizeof els[i].val, "%.159s", kv[k]); els[i].dirty = 1; }
@@ -419,11 +434,12 @@ static void render(void) {
 			break; }
 		case 'C': {   /* home tile: colored icon over its name */
 			int x = tile_x(e), tw0 = tile_w(), ic = icon_id(e->c);
+			if (x >= SW || x + tw0 <= 0) break;   /* on another page */
 			rrect(x, y, tw0, TILE_H, 20, i == pressed ? C_DOWN : C_ITM);
-			if (ic >= 0) icon_sz(x + (tw0 - 46) / 2, y + 22, ic, 1, icon_color(e->c));
+			if (ic >= 0) icon_sz(x + (tw0 - 46) / 2, y + 20, ic, 1, icon_color(e->c));
 			const char *s = e->b ? e->b : "";
 			int lines = wrap2(s, 0, 0, tw0 - 20, 2, 0, 0, 1) / LINE(2);
-			wrap2(s, x + 10, y + (lines > 1 ? 72 : 84), tw0 - 20, 2, C_TXT, 1, 1);
+			wrap2(s, x + 10, y + (lines > 1 ? 70 : 82), tw0 - 20, 2, C_TXT, 1, 1);
 			break; }
 		case 'B': {
 			char st = e->c ? *e->c : 'n'; uint32_t bg = st == 'p' ? C_ACC : st == 'd' ? C_DNGB : st == 'i' ? C_ITM : C_BTN;
@@ -482,6 +498,10 @@ static void render(void) {
 			}
 			break; }
 		}
+	}
+	if (npages > 1) {   /* page dots under the tiles */
+		int dy = TOP + tiles_y + tiles_h - scroll + 8, dx = SW / 2 - (npages * 22 - 12) / 2;
+		for (int p = 0; p < npages; p++) rrect(dx + p * 22, dy, 10, 10, 5, p == page ? C_WHITE : C_KEY);
 	}
 	clip0 = 0; clip1 = SH;
 	/* scroll hint */
@@ -623,6 +643,10 @@ static void wake(void) {
 static int evkey = -1, evtouch = -1;
 static int t_slot, t_id = -1, t_x, t_y, t_down, t_x0, t_y0, t_scroll0, dragging, ignore;
 static double last_drag_render;
+/* while a finger drags: a new frame at most every 16 ms (~60 per second) */
+#define FRAME 0.016
+static void frame(void) { if (now() - last_drag_render > FRAME) { render(); last_drag_render = now(); } }
+static int hdrag;   /* sideways drag of the tile pages */
 static int hit(int x, int y) {
 	if (y < TOP) return (back[0] && x < 80) ? -2 : -1;
 	if (y >= TOP + view_h()) return -1;
@@ -678,12 +702,12 @@ static void slide(int x) {
 	int v = lo + (x - x0) * (hi - lo) / (x1 - x0); if (v < lo) v = lo; if (v > hi) v = hi;
 	snprintf(e->val, sizeof e->val, "%d", v);
 	if (!strcmp(e->a, "disp.bright") && v != bright) { bright = v; set_bright(); }
-	if (now() - last_drag_render > 0.04) { render(); last_drag_render = now(); }
+	frame();
 }
 static void touch_down(int x, int y) {
 	if (debug) fprintf(stderr, "%.3f dedo %d,%d%s\n", now(), x, y, shown ? "" : " (despierta)");
 	if (!shown) { ignore = 1; wake(); return; }
-	poke(); t_x0 = x; t_y0 = y; t_scroll0 = scroll; dragging = 0; t_maxd = 0; t_time0 = now();
+	poke(); t_x0 = x; t_y0 = y; t_scroll0 = scroll; dragging = hdrag = 0; t_maxd = 0; t_time0 = now();
 	/* locked: only a drag that starts on the knob counts */
 	if (locked) { lock_drag = y > lock_y() - 30 && y < lock_y() + LK_H + 30 && x < PAD + 4 + LK_K + 40; lock_x = 0; return; }
 	if (kb_open && y >= KBY - PVH) { kb_down = kb_hit(x, y); pressed = t_el = -1; }
@@ -697,15 +721,23 @@ static void touch_move(int x, int y) {
 	if (locked) {
 		if (!lock_drag) return;
 		lock_x = x - t_x0; if (lock_x < 0) lock_x = 0; if (lock_x > lock_range()) lock_x = lock_range();
-		if (now() - last_drag_render > 0.04) { render(); last_drag_render = now(); }
+		frame();
 		return;
 	}
 	if (kb_open && t_y0 >= KBY - PVH) return;
 	if (sliding()) { slide(x); return; }
+	/* sideways on the tiles: change page */
+	int ty = t_y0 - TOP + scroll, on_tiles = npages > 1 && !kb_open && ty >= tiles_y && ty < tiles_y + tiles_h + DOTS_H;
+	if (!dragging && !hdrag && on_tiles && abs(x - t_x0) > 24 && abs(x - t_x0) > abs(y - t_y0)) { hdrag = 1; pressed = -1; }
+	if (hdrag) {
+		page_dx = x - t_x0;
+		if ((page == 0 && page_dx > 0) || (page == npages - 1 && page_dx < 0)) page_dx /= 3;   /* no more pages: it resists */
+		frame(); return;
+	}
 	if (!dragging && abs(y - t_y0) > 32 && content_h > view_h()) { dragging = 1; pressed = -1; }
 	if (dragging) {
 		scroll = t_scroll0 - (y - t_y0); clamp_scroll();
-		if (now() - last_drag_render > 0.04) { render(); last_drag_render = now(); }
+		frame();
 	}
 }
 static void touch_up(int x, int y) {
@@ -725,6 +757,18 @@ static void touch_up(int x, int y) {
 	if (sliding()) {
 		char a[200]; struct el *e = &els[t_el]; snprintf(a, sizeof a, "%s:%s", e->a, e->val);
 		t_el = -1; kb_open = 0; send_action(a, 0); return;
+	}
+	if (hdrag) {   /* past a fifth of the width, or a quick flick: next page; then it slides into place */
+		int quick = dur < 0.25 && abs(page_dx) > 40;
+		int dir = page_dx < -SW / 5 || (quick && page_dx < 0) ? 1 : page_dx > SW / 5 || (quick && page_dx > 0) ? -1 : 0;
+		if (page + dir < 0 || page + dir >= npages) dir = 0;
+		page += dir; hdrag = 0;
+		int off = page_dx + dir * SW;   /* same picture, counted from the new page */
+		double t0 = now(), len = 0.18;
+		for (double p = 0; p < 1; p = (now() - t0) / len) { page_dx = (int)(off * (1 - p) * (1 - p)); render(); }
+		page_dx = 0; render();
+		if (debug) fprintf(stderr, "%.3f pagina %d de %d\n", now(), page + 1, npages);
+		return;
 	}
 	int tap = t_maxd < TAP_MOVE && dur < TAP_TIME;
 	if (dragging && !tap) {
@@ -776,7 +820,7 @@ static void key(int c) {
 	if (c == KEY_VOLUMEUP) { scroll -= 300; clamp_scroll(); render(); }
 	else if (c == KEY_VOLUMEDOWN) { scroll += 300; clamp_scroll(); render(); }
 	else if (c == KEY_HOME) { kb_open = 0; send_action("nav:home", 0); }
-	else if (c == KEY_BACK) { if (kb_open) { kb_open = 0; render(); } else if (back[0]) send_action(back, 0); }
+	else if (c == KEY_BACK) { if (kb_open) { kb_open = 0; render(); } else if (back[0]) send_action(back, 0); else if (page) { page = 0; render(); } }
 	else if (c == KEY_RECENTS) { kb_open = 0; send_action("nav:res", 0); }
 }
 static void touch_events(int act) {

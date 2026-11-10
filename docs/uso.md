@@ -8,6 +8,7 @@
 | Desbloquear | Arrastrar el círculo de *Desliza para desbloquear* hasta el final (con la pantalla de bloqueo activada) |
 | Apagarla | Botón de encendido (pulsación corta) o sola al pasar el tiempo elegido |
 | Apagar o reiniciar el J1 | Mantener el botón de encendido 1,5 s → *Apagar* / *Reiniciar* |
+| Cambiar de página en el inicio | Deslizar las baldosas a izquierda o derecha (los puntos indican la página); *Atrás* vuelve a la primera |
 | Desplazar | Arrastrar, o Volumen +/− |
 | Volver | Flecha arriba a la izquierda, o tecla táctil *Atrás* |
 | Inicio | Botón Home |
