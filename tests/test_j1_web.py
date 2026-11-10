@@ -132,6 +132,10 @@ class Tests(unittest.TestCase):
   app.SPEED.update(running=False,down='80.0 Mbit/s',up='20.0 Mbit/s');out=app.ui_request(b'a=nav%3Aspeed')
   self.assertIn(b'Subida: 20.0 Mbit/s\tn',out);self.assertIn(b'speed.run\tRepetir',out);self.assertNotIn(b'\nR\t',out)
   self.assertEqual(app.speed_mbit(10**7,8),'10.0 Mbit/s');app.SPEED.clear()
+  # back goes where it was opened from
+  self.assertTrue(app.ui_request(b'a=nav%3Aspeed').startswith(b'T\tspeed\tVelocidad\tnav:home\n'))
+  out=app.ui_request(b'a=nav%3Aspeed%3Asys');self.assertTrue(out.startswith(b'T\tspeed:sys\tVelocidad\tnav:sys\n'));self.assertIn(b'speed.run:sys\tEmpezar',out)
+  self.assertIn(b'nav:speed:sys\t',app.ui_request(b'a=nav%3Asys'))
  def test_display_timeout_line_and_setting(self):
   self.assertIn(b'\nO\t60\n',app.ui_request(b'a=nav%3Ahome'))
   out=app.ui_request(b'a=disp.set%3A0&s=disp');self.assertIn(b'\nO\t0\n',out);self.assertIn(b'> Siempre encendida\tp',out)

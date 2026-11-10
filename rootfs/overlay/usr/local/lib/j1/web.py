@@ -1216,7 +1216,7 @@ def ui_sys(arg):
     except (OSError,KeyError,ValueError):pass
     s.label('Kernel '+os.uname().release,'m').small(BRAND,'m').small(REPO,'m')
     s.button('nav:tz','Zona horaria: '+tz_name(),'i')
-    s.button('nav:speed','Prueba de velocidad','i')
+    s.button('nav:speed:sys','Prueba de velocidad','i')
     return s.button('nav:reboot','Reiniciar J1','d','power').button('nav:poweroff','Apagar J1','d','power')
 
 # speed test through whatever link has the route (cable or Wi-Fi), in the background
@@ -1278,17 +1278,19 @@ def speed_start():
 
 def ui_speed(arg):
     with LOCK:sp=dict(SPEED)
-    s=Screen('speed','Velocidad','nav:sys',refresh=1 if sp.get('running') else 0)
+    # back goes where it was opened from: the home tile or Sistema (arg sys)
+    o=':sys' if arg=='sys' else ''
+    s=Screen('speed'+o,'Velocidad','nav:sys' if o else 'nav:home',refresh=1 if sp.get('running') else 0)
     if not sp:
         s.label('Mide la conexión a Internet por el enlace que esté usando el J1 (cable o Wi-Fi).')
         s.small('Tarda unos 25 s y gasta unos 100-200 MB de datos.','m')
-        return s.button('speed.run','Empezar','p')
+        return s.button('speed.run'+o,'Empezar','p')
     for k,n in (('link','Por'),('ping','Ping'),('down','Bajada'),('up','Subida')):
         if k in sp:s.label('%s: %s'%(n,sp[k]),'y' if sp[k]=='midiendo...' else 'n')
     if sp.get('error'):s.label(sp['error'],'r')
     if sp.get('running'):return s.small('Midiendo...','m')
     s.small('Para la VPN cuenta sobre todo la subida: es lo que el J1 puede enviar a tus dispositivos fuera de casa.','m')
-    return s.button('speed.run','Repetir','i')
+    return s.button('speed.run'+o,'Repetir','i')
 
 def ui_reboot(arg):
     return (Screen('reboot','Reiniciar','nav:sys').label('¿Reiniciar el J1? La VPN se corta durante un minuto.','y')
@@ -1347,7 +1349,7 @@ def ui_action(a, f):
         t=int(arg) if arg.isdigit() else -1
         if t not in dict(DISPLAY_TIMES):raise ValueError('Tiempo no válido')
         display_save(timeout=t);return 'disp','Guardado: '+dict(DISPLAY_TIMES)[t]
-    if verb=='speed.run':speed_start();return 'speed',None
+    if verb=='speed.run':speed_start();return 'speed'+(':sys' if arg=='sys' else ''),None
     if verb=='disp.lock':
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         had=display_pin() is not None
