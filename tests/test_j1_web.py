@@ -277,4 +277,29 @@ class Tests(unittest.TestCase):
    calls.clear();app.upnp_enable(False);app.upnp_sync();self.assertEqual(dels(),[51821]);self.assertEqual(adds(),[]);self.assertEqual(app.RUNTIME['upnp'],'Desactivado')
   with patch.object(app,'upnp_find',return_value=None),patch.object(app,'uplink_ip',return_value='10.10.1.24'):
    app.upnp_enable(True);app.upnp_sync();self.assertIn('no responde a UPnP',app.RUNTIME['upnp'])
+ def test_wifi_qr_parse(self):
+  self.assertEqual(app.qr_wifi_parse(r'WIFI:T:WPA;S:Casa\;1;P:se\:creta123;H:true;;'),{'ssid':'Casa;1','password':'se:creta123'})
+  self.assertEqual(app.qr_wifi_parse('wifi:S:Bar;T:nopass;P:;;'),{'ssid':'Bar','password':''})
+  self.assertEqual(app.qr_wifi_parse(app.wifi_qr_text('Red "x"',r'cla\ve;123')),{'ssid':'Red "x"','password':r'cla\ve;123'})
+  for bad in ('https://example.com','WIFI:T:WEP;S:Old;P:12345;;','WIFI:T:WPA;S:;P:secreta123;;','WIFI:T:WPA;S:Casa;P:corta;;'):
+   with self.assertRaises(ValueError):app.qr_wifi_parse(bad)
+ def test_wifi_from_camera_qr(self):
+  class Proc:
+   def __init__(self,rc,out):self.returncode=rc;self.out=out
+   def communicate(self,timeout=None):return self.out,b''
+   def terminate(self):pass
+  app.CAMQR.clear()
+  with patch.object(app.subprocess,'run'),patch.object(app.subprocess,'Popen',return_value=Proc(0,b'WIFI:T:WPA;S:Casa;P:secreta123;;')) as po:
+   app.camqr_start('rear')
+   for _ in range(100):
+    if not app.CAMQR.get('running'):break
+    app.time.sleep(0.01)
+  self.assertEqual(po.call_args.args[0][1:3],['qr','rear'])
+  out=app.ui_request(b'a=nav%3Awifiscan');self.assertIn(b'Casa',out);self.assertIn(b'camqr.join',out);self.assertNotIn(b'secreta123',out)
+  out=app.ui_request(b'a=camqr.join');self.assertIn(b'Red Casa guardada',out)
+  self.assertIn('ssid='+b'Casa'.hex(),(app.STATE/'wifi.conf').read_text());self.assertEqual(app.CAMQR,{})
+  with patch.object(app.subprocess,'run'),patch.object(app.subprocess,'Popen',return_value=Proc(1,b'')):app.CAMQR.update(running=True,cam='front');app.camqr_run('front')
+  self.assertIn(b'No se ha visto',app.ui_request(b'a=nav%3Awifiscan'))
+  self.assertIn(b'\te\n',app.ui_request(b'a=camqr.start%3Aside&s=wifiscan'))
+  self.assertIn(b'\te\n',app.ui_request(b'a=camqr.join&s=wifiscan'))
 if __name__=='__main__':unittest.main(verbosity=2)

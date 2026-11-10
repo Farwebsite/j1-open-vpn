@@ -17,6 +17,7 @@ iptables
 iptables-legacy
 iw
 libqrencode-tools
+libzbar
 musl-utils
 openresolv
 python3

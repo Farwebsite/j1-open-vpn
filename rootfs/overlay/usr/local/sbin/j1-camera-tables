@@ -1,0 +1,76 @@
+#!/usr/bin/python3
+"""Copies the camera sensors' register tables out of the phone's own Android
+camera HAL (system partition, mounted read-only) into /var/lib/j1/camera.tables
+for j1-camera. Samsung's tables are not part of J1 Open VPN: every J1 has them.
+
+File: 4 tables (front init, front 640x480, rear init, rear 640x480), each a
+little-endian u32 count and count pairs of u16 (register, value)."""
+import os, struct, subprocess, sys, tempfile
+from pathlib import Path
+
+OUT = Path('/var/lib/j1/camera.tables')
+HAL = 'lib/hw/camera.sc8830.so'
+SENSORS = ('g_sr200pc20_yuv_info', 'g_sr541_mipi_yuv_info')   # front, rear
+
+def partition(name):
+    for d in Path('/sys/class/block').glob('mmcblk0p*'):
+        try:
+            if 'PARTNAME=' + name + '\n' in (d / 'uevent').read_text():return '/dev/' + d.name
+        except OSError:pass
+    raise SystemExit('j1-camera-tables: no Android system partition')
+
+def read_hal():
+    dev = partition('system')
+    with tempfile.TemporaryDirectory() as mnt:
+        # noload: no journal replay, the partition is not touched
+        subprocess.run(['mount', '-o', 'ro,noload', '-t', 'ext4', dev, mnt], check=True)
+        try:return (Path(mnt) / HAL).read_bytes()
+        finally:subprocess.run(['umount', mnt])
+
+class Elf:
+    def __init__(s, d):
+        if d[:4] != b'\x7fELF' or d[4] != 1 or d[5] != 1:raise ValueError('not a 32-bit little-endian ELF')
+        s.d = d
+        phoff, shoff = struct.unpack_from('<II', d, 0x1c)
+        phentsize, phnum, shentsize, shnum = struct.unpack_from('<HHHH', d, 0x2a)
+        s.load = []
+        for i in range(phnum):
+            typ, off, va, _, filesz = struct.unpack_from('<IIIII', d, phoff + i * phentsize)
+            if typ == 1:s.load.append((va, off, filesz))
+        secs = [struct.unpack_from('<IIIIIIIIII', d, shoff + i * shentsize) for i in range(shnum)]
+        dynsym = next(x for x in secs if x[1] == 11)   # SHT_DYNSYM
+        strtab = secs[dynsym[6]]
+        s.syms = {}
+        for o in range(dynsym[4], dynsym[4] + dynsym[5], 16):
+            name, value = struct.unpack_from('<II', d, o)
+            end = d.index(b'\0', strtab[4] + name)
+            s.syms[d[strtab[4] + name:end].decode('ascii', 'replace')] = value
+    def off(s, va):
+        for v, o, n in s.load:
+            if v <= va < v + n:return va - v + o
+        raise ValueError('address 0x%x outside the file' % va)
+    def u32(s, va):return struct.unpack_from('<I', s.d, s.off(va))[0]
+
+def tables(elf, sym):
+    """init table and the 640x480 one, from the sensor's SENSOR_INFO_T"""
+    res = elf.u32(elf.syms[sym] + 60)   # resolution_tab_info_ptr: {regs, count, width, height, ...} x 24 bytes
+    out = []
+    for i in range(10):
+        regs, n, wh = elf.u32(res + 24 * i), elf.u32(res + 24 * i + 4), elf.u32(res + 24 * i + 8)
+        if not regs:break
+        if i == 0 or (wh & 0xffff, wh >> 16) == (640, 480):
+            if not 0 < n <= 8192:raise ValueError('bad table size')
+            out.append(elf.d[elf.off(regs):elf.off(regs) + 4 * n])
+        if len(out) == 2:return out
+    raise ValueError(sym + ': no 640x480 table')
+
+def main():
+    if OUT.exists() and '-f' not in sys.argv[1:]:return
+    elf = Elf(read_hal())
+    data = b''.join(struct.pack('<I', len(t) // 4) + t for sym in SENSORS for t in tables(elf, sym))
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OUT.with_suffix('.tmp')
+    tmp.write_bytes(data);os.replace(tmp, OUT)
+    print('j1-camera-tables: %s, %d bytes' % (OUT, len(data)))
+
+if __name__ == '__main__':main()

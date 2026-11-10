@@ -847,6 +847,81 @@ def ui_wifiqr(which):
     s.add('Q',','.join(qr_rows(wifi_qr_text(ssid,pw))))
     return s.small('Cámara del móvil: apunta al código para conectarte a '+ssid,'m')
 
+# Wi-Fi from a QR code read with the J1's own cameras (j1-camera). The camera is
+# on only while scanning; the password read stays in memory and is never shown.
+CAMQR={}
+CAMQR_SECONDS=60
+CAM_NAMES={'rear':'trasera','front':'delantera'}
+def qr_wifi_parse(text):
+    """WIFI:T:WPA;S:name;P:password;H:true;; -> dict(ssid, password)"""
+    if not text[:5].upper()=='WIFI:':raise ValueError('El código no es de una red Wi-Fi')
+    fields={};key=None;val='';i=5
+    while i<len(text):
+        ch=text[i]
+        if ch=='\\' and i+1<len(text):val+=text[i+1];i+=2;continue
+        if key is None and ch==':':key=val.upper();val=''
+        elif ch==';':
+            if key:fields[key]=val
+            key=None;val=''
+        else:val+=ch
+        i+=1
+    if key:fields[key]=val
+    ssid=fields.get('S','');kind=fields.get('T','').upper();pw=fields.get('P','')
+    if not 1<=len(ssid.encode())<=32:raise ValueError('El código no trae el nombre de la red')
+    if kind=='WEP':raise ValueError('Red WEP: el J1 no la admite')
+    if kind=='NOPASS' or (not kind and not pw):pw=''
+    elif not 8<=len(pw.encode())<=63:raise ValueError('La contraseña del código no es válida (8 a 63 caracteres)')
+    return {'ssid':ssid,'password':pw}
+def camqr_run(cam):
+    def done(**kw):
+        with LOCK:CAMQR.update(kw,running=False,proc=None)
+    try:
+        subprocess.run(['/usr/local/sbin/j1-camera-tables'],capture_output=True,timeout=60,check=True)
+        p=subprocess.Popen(['/usr/local/bin/j1-camera','qr',cam,str(CAMQR_SECONDS)],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        with LOCK:CAMQR['proc']=p
+        out,err=p.communicate(timeout=CAMQR_SECONDS+30)
+    except (OSError,subprocess.SubprocessError):return done(error='No se pudo usar la cámara')
+    if p.returncode==1:return done(error='Cancelado' if CAMQR.get('cancel') else 'No se ha visto ningún código QR')
+    if p.returncode:
+        log('Cámara %s: %s'%(cam,err.decode('utf8','replace').strip()[-200:]))
+        return done(error='La cámara %s no responde'%CAM_NAMES[cam])
+    try:net=qr_wifi_parse(out.decode('utf8','replace'))
+    except ValueError as e:return done(error=str(e))
+    log('Código QR leído con la cámara %s: red %s'%(CAM_NAMES[cam],net['ssid']))
+    done(net=net)
+def camqr_start(cam):
+    if cam not in CAM_NAMES:raise ValueError('Cámara no válida')
+    with LOCK:
+        if CAMQR.get('running'):return
+        CAMQR.clear();CAMQR.update(running=True,cam=cam)
+    threading.Thread(target=camqr_run,args=(cam,),daemon=True).start()
+def camqr_stop():
+    with LOCK:
+        p=CAMQR.get('proc');CAMQR['cancel']=True
+    if p:p.terminate()   # j1-camera turns the camera off on SIGTERM
+def camqr_join():
+    with LOCK:net=CAMQR.get('net')
+    if not net:raise ValueError('Primero lee un código QR')
+    wifi_save({'ssid':net['ssid'],'password':net['password'],'open':'' if net['password'] else '1'})
+    with LOCK:CAMQR.clear()
+    return net['ssid']
+
+def ui_wifiscan(arg):
+    with LOCK:q=dict(CAMQR)
+    s=Screen('wifiscan','Escanear QR','nav:wifi',refresh=1 if q.get('running') else 0)
+    if q.get('running'):
+        if q['cam']=='rear':s.label('Apunta la parte de atrás del J1 al código QR','y')
+        else:s.label('Pon la pantalla del J1 mirando al código QR','y')
+        s.small('A unos 20-30 cm y con buena luz. Se para sola en %d s.'%CAMQR_SECONDS,'m')
+        return s.button('camqr.stop','Cancelar','d')
+    if q.get('net'):
+        n=q['net'];s.label(n['ssid'],'g').small('Con contraseña' if n['password'] else 'Red abierta, sin contraseña','m')
+        return s.button('camqr.join','Conectar','p','wifi').button('camqr.start:'+q['cam'],'Leer otro código','i','cam')
+    if q.get('error'):s.label(q['error'],'m' if q['error']=='Cancelado' else 'y')
+    else:s.label('Lee el código QR de una red Wi-Fi con la cámara del J1 para conectarte sin escribir la contraseña.')
+    return (s.button('camqr.start:rear','Cámara trasera','p','cam').button('camqr.start:front','Cámara delantera','i','cam')
+        .small('La cámara solo se enciende mientras busca el código.','m'))
+
 # Time zone: POSIX TZ strings (no tzdata needed). Stored in /etc/j1/tz, read by
 # j1-init at boot; web.py, j1-display, j1-network and j1-time-save pick a
 # change up at once, so no restart is needed.
@@ -1035,6 +1110,7 @@ def ui_wifi(arg):
     s.toggle('wifi.off' if on else 'wifi.on','Wi-Fi cliente',on)
     if 'IP fija' in readrun('wifi-summary') or (STATE/'ip-wlan0.conf').exists():s.small('IP manual activa','y')
     s.button('nav:ip:wlan0','IP de la Wi-Fi','i','ip')
+    s.button('nav:wifiscan','Escanear QR de una red','i','cam')
     s.button('wifi.scan','Buscar redes','p','wifi').small(RUNTIME['scan'],'m')
     for n in RUNTIME['networks']:
         s.button('nav:wifinet:'+n['hex'],'%s  %d dBm%s'%(n['name'],n['signal'],'' if n['secure'] else ' · abierta'),'i','wifi')
@@ -1308,7 +1384,7 @@ def ui_power(arg):
 
 UI_SCREENS={'home':lambda a:ui_home(),'wifi':ui_wifi,'wifinet':ui_wifinet,'wifihidden':ui_wifihidden,'ap':ui_ap,
     'ip':ui_ip,'vpn':ui_vpn,'client':ui_client,'qr':ui_qr,'del':ui_del,'dns':ui_dns,'usb':ui_usb,'logs':ui_logs,
-    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz,'panel':ui_panel}
+    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz,'panel':ui_panel,'wifiscan':ui_wifiscan}
 
 def ui_action(a, f):
     """Runs a screen action; returns (next screen, message)."""
@@ -1321,6 +1397,9 @@ def ui_action(a, f):
     if verb=='wifi.hidden':
         pw=f.get('password','');wifi_save({'ssid':f.get('ssid',''),'password':pw,'open':'' if pw else '1'})
         return 'wifi','Red guardada, conectando...'
+    if verb=='camqr.start':camqr_start(arg);return 'wifiscan',None
+    if verb=='camqr.stop':camqr_stop();return 'wifiscan',None
+    if verb=='camqr.join':return 'wifi','Red %s guardada, conectando...'%camqr_join()
     if verb in ('ap.on','ap.off'):ap_enable(verb=='ap.on');return 'ap','Red de configuración '+('activada' if verb=='ap.on' else 'apagada')
     if verb=='ap.pass':ap_password(f.get('password',''));return 'ap','Clave cambiada. Úsala también en la web.'
     if verb=='ip.need':return 'ip:'+cls_ok(arg),'IP manual: escribe la dirección, el prefijo y la puerta de enlace y pulsa Guardar IP manual'
@@ -1386,7 +1465,7 @@ def ui_request(raw):
     try:s=UI_SCREENS.get(name,UI_SCREENS['home'])(arg)
     except (ValueError,RuntimeError) as e:s=ui_home();msg,kind=str(e),'e'
     if msg:s.msg(msg,kind)
-    with LOCK:busy=SPEED.get('running') and name=='speed'
+    with LOCK:busy=(SPEED.get('running') and name=='speed') or (CAMQR.get('running') and name=='wifiscan')
     s.rows.insert(1,['O','0' if busy else str(display_timeout())]);s.rows.insert(1,['V',str(display_brightness())])
     pin=display_lock() and display_pin() is not None
     s.rows.insert(1,['K','1' if display_lock() else '0','1' if pin else '0','1' if pin and pin_blocked() else '0'])

@@ -49,6 +49,10 @@ mkdir -p "$R/tmp/display" "$R/usr/local/bin"
 cp "$HERE/display/j1-display.c" "$HERE/display/j1-ui-font.h" "$R/tmp/display/"
 chroot "$R" /usr/bin/cc -Os -static -Wall -Wextra -Werror -o /usr/local/bin/j1-display /tmp/display/j1-display.c
 chroot "$R" /usr/bin/strip /usr/local/bin/j1-display
+# cameras: QR codes of Wi-Fi networks (libzbar from packages.txt)
+cp "$HERE/camera/j1-camera.c" "$R/tmp/display/"
+chroot "$R" /usr/bin/cc -Os -Wall -Wextra -Werror -o /usr/local/bin/j1-camera /tmp/display/j1-camera.c -l:libzbar.so.0
+chroot "$R" /usr/bin/strip /usr/local/bin/j1-camera
 chroot "$R" /sbin/apk del .j1-build
 rm -rf "$R/tmp/display"
 
@@ -58,7 +62,7 @@ echo "== Programas J1"
 cp -r --no-preserve=mode,ownership "$HERE/overlay/." "$R/"
 find "$R/usr/local" -name __pycache__ -prune -exec rm -rf {} +
 chmod 755 "$R/sbin/j1-init" "$R"/usr/local/sbin/*
-chmod 700 "$R/usr/local/bin/j1-display"
+chmod 700 "$R/usr/local/bin/j1-display" "$R/usr/local/bin/j1-camera"
 chmod 600 "$R/usr/local/lib/j1/web.py"
 mkdir -p "$R/usr/share/j1/defaults" "$R/system/etc/wifi" "$R/efs" "$R/etc/j1" "$R/etc/dropbear"
 install -m 600 "$HERE"/defaults/* "$R/usr/share/j1/defaults/"

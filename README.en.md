@@ -11,6 +11,7 @@ RAM prices are sky-high, so even a small home server costs more and more. Meanwh
 ## Features
 
 - WireGuard **in the kernel** (ARM/NEON crypto); clients created on the phone screen and imported with a **QR code**.
+- Joins a Wi-Fi network by **reading its QR code with the J1's rear or front camera**: no typing the password.
 - Touchscreen UI (C, framebuffer, antialiased Inter font, colored icons, tile home screen, zero CPU when the screen is off): status, Wi-Fi, VPN clients, logs, resources, brightness, lock screen (slide to unlock, optional PIN, can be turned off), speed test, power menu.
 - Optional web panel over the phone's own Wi-Fi network or USB.
 - **USB Ethernet via OTG** (RTL8153 tested): the phone powers the adapter; cable first, **Wi-Fi as standby on the same IP** (single port forward).
