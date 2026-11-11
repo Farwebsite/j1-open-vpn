@@ -693,7 +693,7 @@ static void render(void) {
 		case 'D': {   /* slider: track, filled part, knob, percentage */
 			int lo, hi, v = slider_val(e, &lo, &hi), x0 = PAD + 24, x1 = SW - PAD - 104;
 			int kx = x0 + (v - lo) * (x1 - x0) / (hi - lo);
-			char pct[8]; snprintf(pct, sizeof pct, "%d%%", v * 100 / hi);
+			char pct[8]; snprintf(pct, sizeof pct, "%d%%", strcmp(e->a, "disp.bright") ? v : v * 100 / hi);   /* others: the value is a % */
 			rrect(PAD, y, w, e->h - 8, 16, C_ITM);
 			rrect(x0, y + 28, x1 - x0, 8, 4, C_KEYS);
 			if (kx - x0 >= 8) rrect(x0, y + 28, kx - x0, 8, 4, C_ACC);

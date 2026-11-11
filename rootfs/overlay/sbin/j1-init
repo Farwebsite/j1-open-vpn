@@ -68,6 +68,8 @@ printf 'WG: iniciando\n' >/run/vpn-summary
 # web.py right away (it retries until the network addresses exist): the screen gets its content in ~2 s
 /usr/bin/python3 /usr/local/lib/j1/web.py >/run/web.log 2>&1 </dev/null &
 echo $! >/run/web.pid
+# web.py pauses the charger at the charge limit: if web.py is gone, charging comes back
+(while sleep 300; do pgrep -f "python3 /usr/local/lib/j1/w[e]b" >/dev/null || echo 0 >/sys/class/power_supply/battery/batt_slate_mode; done) >/dev/null 2>&1 </dev/null &
 USB=/sys/class/android_usb/android0
 if [ -d "$USB" ]; then
  echo 0 >"$USB/enable"

@@ -378,4 +378,32 @@ class Tests(unittest.TestCase):
    self.assertIn('href="#bat"',app.home_html());self.assertNotIn('Tiempo restante',app.home_html())
    (bat/'capacity').unlink();self.assertEqual(app.bat_info(),[]);self.assertIn('No se puede leer',app.bat_section())
   app.BAT_HIST.clear()
+ def test_battery_limit(self):
+  bat=app.STATE/'bat2';bat.mkdir();slate=bat/'batt_slate_mode'
+  def put(**v):
+   for k,x in dict(dict(capacity='70',status='Charging',voltage_now='4000000',temp='280',batt_read_raw_soc='700',batt_slate_mode='0'),**v).items():(bat/k).write_text(x+'\n')
+  fgu=bat/'fgu_current'
+  with patch.object(app,'BAT',bat),patch.object(app,'FGU',fgu):
+   put();fgu.write_text('370\n')
+   # no limit: charges to 100 %, the screen offers the switch with 80 %
+   self.assertEqual(app.bat_limit(),0);out=app.ui_request(b'a=nav%3Abat').decode('cp437')
+   self.assertIn('S\tbat.limit:80\tLimitar la carga\t0',out);self.assertNotIn('bat.limit\t',out)
+   self.assertIn('name=action value=batlimit',app.bat_section());self.assertIn('value=80>',app.bat_section())
+   # 80 %: time to the limit, the slider shows it
+   out=app.ui_request(b'a=bat.limit%3A80').decode('cp437');self.assertIn('Carga limitada al 80%',out);self.assertIn('D\tbat.limit\t80\t50\t95',out)
+   self.assertIn(('Llega al 80% en','unas 30 min','g'),app.bat_info());self.assertEqual(slate.read_text(),'0\n')
+   # reaches 80 %: charger paused, the J1 runs on the battery with the cable plugged
+   put(capacity='80',batt_read_raw_soc='800');app.bat_limit_apply();self.assertEqual(slate.read_text(),'1')
+   put(capacity='80',status='Discharging',batt_slate_mode='1');fgu.write_text('-110\n');info=app.bat_info()
+   self.assertEqual(info[1],('Estado','en pausa por el límite del 80%; vuelve a cargar al 75%','g'))
+   self.assertIn(('Consumo','110 mA (0.44 W)','y'),info);self.assertNotIn('Tiempo restante',[n for n,v,c in info])
+   app.bat_limit_apply();self.assertEqual(slate.read_text(),'1\n')   # 80 %: still paused
+   put(capacity='75',status='Discharging',batt_slate_mode='1');app.bat_limit_apply();self.assertEqual(slate.read_text(),'0')
+   # custom value, kept when switched off and on again; out of range refused
+   app.ui_action('bat.limit:65',{});self.assertEqual(app.bat_limit(),65)
+   app.ui_action('bat.limit:0',{});self.assertEqual(app.bat_limit(),0);self.assertIn('S\tbat.limit:65\t',app.ui_request(b'a=nav%3Abat').decode('cp437'))
+   for bad in ('49','96','x'):self.assertRaises(ValueError,app.ui_action,'bat.limit:'+bad,{})
+   # limit off while paused: charging comes back at once
+   app.bat_limit_save(90);put(capacity='92',status='Discharging',batt_slate_mode='1');app.bat_limit_save(0);self.assertEqual(slate.read_text(),'0')
+  app.BAT_HIST.clear()
 if __name__=='__main__':unittest.main(verbosity=2)

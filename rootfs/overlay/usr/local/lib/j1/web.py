@@ -746,6 +746,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif action=='lockpinoff':pin_clear();message='Código de desbloqueo quitado.'
             elif action=='lock':display_save(lock=f.get('on')=='1');message='Pantalla de bloqueo '+('activada.' if display_lock() else 'desactivada.')
             elif action=='tz':message='Zona horaria: '+tz_set(f.get('zone',''))
+            elif action=='batlimit':
+                v=f.get('limit','');v=(int(v) if v.isdigit() else -1) if f.get('on')=='1' else 0
+                bat_limit_save(v);message='Carga limitada al %d %%.'%v if v else 'Sin límite de carga.'
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
             elif action=='dns':
                 dns_settings(f.get('enabled')=='1',f.get('hostname',''),f.get('zone_id',''),f.get('token',''))
@@ -1135,7 +1138,33 @@ def bat_read():
     try:b['ma']=int(FGU.read_text().strip())
     except (OSError,ValueError):b['ma']=None
     if b['ma'] is not None and abs(b['ma'])<=1:b['ma']=None   # no counter: always 1
+    if bat_paused():b['status']='Paused'
     return b
+# ---- charge limit: at the limit the charger is paused (slate mode: the J1 runs
+# on the battery with the cable plugged) and comes back BAT_RESUME points lower.
+# j1-init turns it back on if web.py is not running.
+BAT_LIMIT_MIN,BAT_LIMIT_MAX=50,95
+BAT_RESUME=5
+def bat_limits():
+    c=load('battery.json',{})
+    ok=lambda v:isinstance(v,int) and BAT_LIMIT_MIN<=v<=BAT_LIMIT_MAX
+    return (c['limit'] if ok(c.get('limit')) else 0),(c['last'] if ok(c.get('last')) else 80)
+def bat_limit():return bat_limits()[0]   # 0: no limit
+def bat_limit_save(v):
+    if v and not BAT_LIMIT_MIN<=v<=BAT_LIMIT_MAX:raise ValueError('El límite va del %d al %d %%'%(BAT_LIMIT_MIN,BAT_LIMIT_MAX))
+    save('battery.json',{'limit':v,'last':v or bat_limits()[1]});bat_limit_apply()
+def bat_paused():
+    try:return (BAT/'batt_slate_mode').read_text().strip()=='1'
+    except OSError:return False
+def bat_pause(on):
+    try:(BAT/'batt_slate_mode').write_text('1' if on else '0')
+    except OSError:pass
+def bat_limit_apply():
+    b=bat_read();lim=bat_limit()
+    if not b:return
+    if b['status']=='Paused':
+        if not lim or b['cap']<=lim-BAT_RESUME:bat_pause(False);log('Carga reanudada al %d%%'%b['cap'])
+    elif lim and b['status'] in ('Charging','Full') and b['cap']>=lim:bat_pause(True);log('Carga en pausa: límite del %d%%'%lim)
 def bat_sample():
     b=bat_read();now=time.monotonic()
     if not b:return
@@ -1160,19 +1189,22 @@ def bat_info():
     # [(name, value, colour)]: the Batería screen and the web panel's section
     b=bat_read()
     if not b:return []
-    st=b['status'];t=b['temp'];ma=b['ma']
+    st=b['status'];t=b['temp'];ma=b['ma'];lim=bat_limit()
+    paused='en pausa por el límite del %d%%; vuelve a cargar al %d%%'%(lim,lim-BAT_RESUME) if lim else 'en pausa'
     out=[('Carga','%d%%'%b['cap'],'r' if b['cap']<=15 else 'y' if b['cap']<=30 else 'g'),
-         ('Estado',{'Charging':'cargando','Full':'cargada, con el cargador puesto','Discharging':'sin cargador, usando la batería'}.get(st,'cargador puesto, sin cargar'),'y' if st=='Discharging' else 'g'),
+         ('Estado',{'Charging':'cargando','Full':'cargada, con el cargador puesto','Discharging':'sin cargador, usando la batería','Paused':paused}.get(st,'cargador puesto, sin cargar'),'y' if st=='Discharging' else 'g'),
          ('Temperatura','%.1f °C'%t,'r' if t>=55 else 'y' if t>=45 else 'g'),('Voltaje','%.2f V'%b['v'],'y' if b['v']<3.6 else 'g')]
     if ma is not None:
         mean=bat_mean_ma(b)
-        if st=='Discharging' and ma<0:
+        if st in ('Discharging','Paused') and ma<0:
             out.append(('Consumo','%d mA (%.2f W)'%(-ma,-ma*b['v']/1000),'y'))
-            if mean<0:out.append(('Tiempo restante','unas '+duration(b['soc']/100*BAT_MAH/-mean),'y'))
+            if st=='Discharging' and mean<0:out.append(('Tiempo restante','unas '+duration(b['soc']/100*BAT_MAH/-mean),'y'))
         elif st=='Charging' and ma>0:
             out.append(('Corriente de carga','%d mA'%ma,'g'))
             # last, constant-voltage stretch: the current keeps falling, no time from it
-            if mean<100 or b['v']>=4.3:out[1]=('Estado','cargando, casi llena','g')
+            if lim:
+                if b['soc']<lim:out.append(('Llega al %d%% en'%lim,'unas '+duration((lim-b['soc'])/100*BAT_MAH/mean),'g'))
+            elif mean<100 or b['v']>=4.3:out[1]=('Estado','cargando, casi llena','g')
             else:out.append(('Llena en','unas '+duration((100-b['soc'])/100*BAT_MAH/mean),'g'))
     elif st=='Discharging':
         r=bat_rate()
@@ -1193,11 +1225,19 @@ def ui_bat(arg):
     s=Screen('bat','Batería',refresh=30);info=bat_info()
     if not info:return s.label('No se puede leer la batería.','r')
     for n,v,c in info:s.label('%s: %s'%(n,v),c)
-    return s.small(bat_note(),'m')
+    s.small(bat_note(),'m')
+    lim,last=bat_limits()
+    s.gap().toggle('bat.limit:0' if lim else 'bat.limit:%d'%last,'Limitar la carga',lim)
+    if lim:s.label('Cargar hasta:').slider('bat.limit',lim,BAT_LIMIT_MIN,BAT_LIMIT_MAX)
+    return s.small(BAT_LIMIT_NOTE,'m')
+BAT_LIMIT_NOTE='Tener la batería siempre al 100%% con el cargador puesto la desgasta. Con el límite, al llegar se pausa la carga (el J1 usa la batería con el cable puesto) y vuelve a cargar %d puntos por debajo.'%BAT_RESUME
 def bat_section():
-    info=bat_info()
+    info=bat_info();lim,last=bat_limits()
     return ('<section id=bat><h2>Batería</h2>'+(''.join('<p class=kv>'+('<span class="dot '+c+'"></span>' if c in 'gyr' else '')+'<span>'+esc(n)+': <b>'+esc(v)+'</b></span></p>' for n,v,c in info) if info else '<p>No se puede leer la batería.</p>')+
-            '<p class=muted>'+esc(bat_note())+'</p></section>')
+            '<p class=muted>'+esc(bat_note())+'</p><h3>Límite de carga</h3><form method=post>'+hidden()+'<input type=hidden name=action value=batlimit>'
+            '<label><input type=checkbox name=on value=1'+(' checked' if lim else '')+'> Limitar la carga</label>'
+            '<label>Cargar hasta (%%)<input type=number name=limit min=%d max=%d required value=%d></label>'%(BAT_LIMIT_MIN,BAT_LIMIT_MAX,lim or last)+
+            '<small>'+esc(BAT_LIMIT_NOTE)+'</small><br><button>Guardar límite</button></form></section>')
 
 def ui_res(arg):
     s=Screen('res','Recursos',refresh=3)
@@ -1560,6 +1600,9 @@ def ui_action(a, f):
         if t not in dict(DISPLAY_TIMES):raise ValueError('Tiempo no válido')
         display_save(timeout=t);return 'disp','Guardado: '+dict(DISPLAY_TIMES)[t]
     if verb=='speed.run':speed_start();return 'speed',None
+    if verb=='bat.limit':
+        v=int(arg) if arg.isdigit() else -1
+        bat_limit_save(v);return 'bat','Carga limitada al %d%%'%v if v else 'Sin límite de carga'
     if verb=='disp.lock':
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         had=display_pin() is not None
@@ -1706,7 +1749,7 @@ def has_uplink():
 def worker():
     next_dns=0;next_vpn=0;next_upnp=0;next_bat=0
     while True:
-        if time.monotonic()>=next_bat:bat_sample();next_bat=time.monotonic()+60
+        if time.monotonic()>=next_bat:bat_limit_apply();bat_sample();next_bat=time.monotonic()+60
         if (time.monotonic()>=next_upnp or (RUN/'upnp-request').exists()) and has_uplink():
             (RUN/'upnp-request').unlink(missing_ok=True)
             try:upnp_sync();next_upnp=time.monotonic()+1800
