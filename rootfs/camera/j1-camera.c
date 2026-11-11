@@ -7,7 +7,8 @@
  * 240x320 RGB, upright (the sensors are mounted at 90 and 270 degrees) and,
  * for the front camera, mirrored like a selfie.
  *
- * SIGUSR1 focuses the rear camera again (tap on the picture).
+ * SIGUSR1 focuses the rear camera again (tap on the picture). J1_CAMERA_DEBUG
+ * set: how the focus went, on stderr.
  *
  * Rear camera settings come from CONTROL, read again whenever it changes, one
  * line "b=a m=s c=2 s=1 f=m": brightness a (automatic) or 0-8, metering m/c/s
@@ -180,17 +181,54 @@ static int send16(const struct table *t) {
 	return ioctl(sfd, SENSOR_IO_I2C_WRITE_REGS, &x) < 0 ? -1 : 0;
 }
 
-/* rear lens range, like the HAL's _sr541_set_focus_mode: normal starts from
- * the position stored at 0x062a, macro (QR codes at 10-30 cm) from 0x062c */
-static void focus_mode(int macro) {
-	usleep(32000);
-	int v = rreg(macro ? 0x062c : 0x062a); if (v < 0) return;
-	usleep(64000);
-	wreg(0x3824, 0x1400); wreg(0x3826, 0x0100);
-	wreg(0x3824, ((v << 4) & 0xff) | ((v >> 12) & 0xf) | (v & 0xf000) | 0x0a00); wreg(0x3826, 0x0200);
-	usleep(32000);
-	if (macro) { wreg(0x05b0, 0x8616); wreg(0x2c0a, 0x0008); }
-	else wreg(0x05b0, 0x9e16);
+/* rear focus. The SR541's MCU takes a lens position (10 bits, higher =
+ * closer) through 0x3824/0x3826, as in the HAL's focus mode tables: normal
+ * takes the lens to 0x0d2, macro to 0x294. Its own autofocus does not move the
+ * lens here, so focusing is done like a phone does: the lens goes through its
+ * range, the sharpness of the middle of each picture is measured, and the same
+ * again in small steps around the best one; the first pass stops once the
+ * sharpness has clearly dropped past a peak. Macro only goes through the near
+ * half. */
+#define LENS_FAR 0x0c0
+#define LENS_MID 0x1c0
+#define LENS_NEAR 0x2e0
+static int debug;
+static void lens_manual(void) { wreg(0x3824, 0x1400); wreg(0x3826, 0x0100); }
+static void lens(int pos) { wreg(0x3824, ((pos >> 4) & 0xff) | ((pos & 0xf) << 12) | 0x0a00); wreg(0x3826, 0x0200); }
+static uint64_t sharpness(const uint8_t *y) {
+	uint64_t s = 0;
+	for (int r = H / 4; r < H * 3 / 4; r += 2) {
+		const uint8_t *p = y + r * W;
+		for (int c = W / 4; c < W * 3 / 4; c++) { int d = p[c + 2] - p[c]; s += (uint64_t)(d * d); }
+	}
+	return s;
+}
+static struct { int on, pos, lo, hi, step, wait, best_pos, falls; uint64_t best; } af;
+#define AF_WAIT 1   /* pictures taken while the lens moves */
+#define AF_STEP 0x28
+static void af_start(int macro) {
+	af.on = 1; af.lo = macro ? LENS_MID : LENS_FAR; af.hi = LENS_NEAR; af.step = AF_STEP;
+	af.pos = af.lo; af.best = 0; af.best_pos = af.lo; af.falls = 0; af.wait = AF_WAIT;
+	lens_manual(); lens(af.pos);
+}
+/* one picture while focusing; 1 = still focusing (the QR reader waits) */
+static int af_frame(const uint8_t *y) {
+	if (!af.on) return 0;
+	if (af.wait > 0) { af.wait--; return 1; }
+	uint64_t s = sharpness(y);
+	if (debug) fprintf(stderr, "j1-camera: lens %03x sharpness %llu\n", af.pos, (unsigned long long)s);
+	if (s > af.best) { af.best = s; af.best_pos = af.pos; af.falls = 0; }
+	else if (s * 4 < af.best * 3) af.falls++;   /* under 3/4 of the best */
+	af.pos += af.step;
+	if (af.pos > af.hi || (af.step == AF_STEP && af.falls >= 2)) {
+		if (af.step == 8) { af.on = 0; lens(af.best_pos); if (debug) fprintf(stderr, "j1-camera: lens at %03x\n", af.best_pos); return 0; }
+		af.step = 8; af.lo = af.best_pos - 0x18; af.hi = af.best_pos + 0x18;
+		if (af.lo < LENS_FAR) af.lo = LENS_FAR;
+		if (af.hi > LENS_NEAR) af.hi = LENS_NEAR;
+		af.pos = af.lo; af.best = 0;
+	}
+	lens(af.pos); af.wait = AF_WAIT;
+	return 1;
 }
 
 /* rear settings (CONTROL); -1 = not set yet */
@@ -230,7 +268,7 @@ static void apply_settings(void) {
 	if (asked.sharp != now_set.sharp) send16(&tab[T_SHARP + asked.sharp]);
 	if (asked.bright >= 0 && asked.bright != now_set.bright) set_level(asked.bright);
 	if (asked.bright < 0 && now_set.bright != -1) tell_level();
-	if (asked.macro != now_set.macro) { focus_mode(asked.macro); focus = now_set.macro >= 0; }   /* the first time: focus at frame 5 */
+	if (asked.macro != now_set.macro && now_set.macro >= 0) focus = 1;   /* the first time: focus at frame 5 */
 	now_set = asked;
 }
 /* automatic brightness, from the middle of the picture (where the code is):
@@ -355,7 +393,7 @@ int main(int argc, char **argv) {
 	}
 	int qr = !strcmp(argv[1], "qr");
 	const struct cam *c = strcmp(argv[2], "rear") ? &FRONT : &REAR;
-	W = c->w; H = c->h;
+	W = c->w; H = c->h; debug = getenv("J1_CAMERA_DEBUG") != 0;
 	int rear = c == &REAR, seconds = qr ? (argc > 3 ? atoi(argv[3]) : 60) : 30;
 	if (seconds < 1 || seconds > 600) seconds = 60;
 	regbits = c->regbits;
@@ -467,7 +505,11 @@ int main(int argc, char **argv) {
 		}
 		const volatile uint32_t *p = (const volatile uint32_t *)(mem + (b.index % nbuf) * frame);
 		frames++;
-		if (qr) { luma(p, y); copy_words(p + W * H / 4, uv, W * H / 2); preview(y, uv, rear); if (frames > 2 && find_qr(sc, y, frames)) { result = 0; break; } }
+		if (qr) {
+			luma(p, y); copy_words(p + W * H / 4, uv, W * H / 2); preview(y, uv, rear);
+			int focusing = rear && af_frame(y);
+			if (!focusing && frames > 2 && find_qr(sc, y, frames)) { result = 0; break; }
+		}
 		if (!qr && frames == want) {
 			luma(p, y);
 			FILE *o = fopen(argv[3], "wb");
@@ -476,14 +518,13 @@ int main(int argc, char **argv) {
 			result = fclose(o) ? 2 : 0;
 			break;
 		}
-		/* rear: settings and lens range from frame 3 on, then autofocus at the
-		 * start, on SIGUSR1 and on a new range, like the HAL's _sr541_AutoFocusDo;
-		 * the lens moves while the frames go on (reading its status every frame
-		 * stops the stream). Automatic brightness looks every 4 frames, time for
-		 * the sensor to follow the last change */
+		/* rear: settings from frame 3 on; focus at the start (once the exposure
+		 * has settled), on SIGUSR1 and on a new range. Automatic brightness looks
+		 * every 4 frames, time for the sensor to follow the last change, and not
+		 * while focusing (it would change the sharpness measured) */
 		if (rear && frames >= 3) apply_settings();
-		if (rear && qr && asked.bright < 0 && frames >= 8 && frames % 4 == 0) auto_level(y);
-		if (rear && (focus || frames == 5)) { focus = 0; wreg(0x05d4, 0x80); }
+		if (rear && qr && asked.bright < 0 && !af.on && frames >= 8 && frames % 4 == 0) auto_level(y);
+		if (rear && qr && (focus || frames == 12)) { focus = 0; af_start(asked.macro); }
 		struct v4l2_buffer fr = b; fr.flags = DCAM_FREE_FRAME;
 		if (write(vfd, &fr, sizeof fr) < 0) { fprintf(stderr, "j1-camera: frame release: %s\n", strerror(errno)); result = 2; break; }
 	}
