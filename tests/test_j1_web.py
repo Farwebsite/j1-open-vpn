@@ -343,7 +343,8 @@ class Tests(unittest.TestCase):
   bat=app.STATE/'bat';bat.mkdir()
   def put(**v):
    for k,x in dict(dict(capacity='80',status='Discharging',voltage_now='3900000',temp='275',batt_read_raw_soc='800'),**v).items():(bat/k).write_text(x+'\n')
-  with patch.object(app,'BAT',bat),patch.object(app.time,'monotonic') as now:
+  fgu=bat/'fgu_current'
+  with patch.object(app,'BAT',bat),patch.object(app,'FGU',fgu),patch.object(app.time,'monotonic') as now:
    app.BAT_HIST.clear();put();now.return_value=1000;app.bat_sample()
    (bat/'health').write_text('Good\n')
    info=app.bat_info();self.assertEqual(info[:4],[('Carga','80%','g'),('Estado','sin cargador, usando la batería','y'),('Temperatura','27.5 °C','g'),('Voltaje','3.90 V','g')])
@@ -351,8 +352,21 @@ class Tests(unittest.TestCase):
    # 2 % in 12 min = 10 %/h: 78 % left lasts 7 h 48 min, 10 % of 7.03 Wh
    put(batt_read_raw_soc='780',capacity='78');now.return_value=1720;app.bat_sample()
    self.assertEqual(app.bat_info()[4:6],[('Tiempo restante','unas 7 h 48 min','y'),('Consumo','aprox. 0.7 W (10.0 % por hora)','y')])
-   out=app.ui_request(b'a=nav%3Abat').decode('cp437');self.assertIn('L\tTiempo restante: unas 7 h 48 min\ty',out);self.assertIn('no mide la corriente',out)
+   out=app.ui_request(b'a=nav%3Abat').decode('cp437');self.assertIn('L\tTiempo restante: unas 7 h 48 min\ty',out);self.assertIn('Sin medida de corriente',out)
    self.assertIn('Consumo: <b>aprox. 0.7 W',app.bat_section())
+   # counter that only says 1 (no measurement): still the estimate from the charge
+   fgu.write_text('1\n');self.assertEqual(app.bat_info()[4][1],'unas 7 h 48 min')
+   # measured current: shown at once; time left from the 10-minute mean, 78 % of 1850 mAh
+   fgu.write_text('-200\n');now.return_value=1730;app.bat_sample()
+   fgu.write_text('-244\n');info=app.bat_info()
+   self.assertEqual(info[4:6],[('Consumo','244 mA (0.95 W)','y'),('Tiempo restante','unas 6 h 30 min','y')])
+   self.assertIn('corriente media',app.bat_section())
+   put(status='Charging',batt_read_raw_soc='900');fgu.write_text('370\n');now.return_value=1740
+   self.assertEqual(app.bat_info()[4:6],[('Corriente de carga','370 mA','g'),('Llena en','unas 30 min','g')])
+   fgu.write_text('60\n');self.assertEqual(app.bat_info()[5],('Llena en','casi llena','g'))
+   # last stretch (constant voltage): the current falls, so no time from it
+   fgu.write_text('300\n');put(status='Charging',voltage_now='4370000');self.assertEqual(app.bat_info()[5],('Llena en','casi llena','g'))
+   fgu.unlink();put()
    # charger plugged: the discharge history no longer counts
    put(status='Charging');now.return_value=1780;app.bat_sample();self.assertEqual(len(app.BAT_HIST),1)
    self.assertEqual(app.bat_info()[1],('Estado','cargando','g'))

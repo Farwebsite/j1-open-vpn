@@ -1115,11 +1115,14 @@ def net_bytes(dev):
     try:return sum(int((Path('/sys/class/net')/dev/'statistics'/k).read_text()) for k in ('rx_bytes','tx_bytes'))
     except OSError:return 0
 
-# ---- battery: the J1 does not measure current (current_now is always 1), so
-# the use and the time left come from how fast the charge (0.1 % steps) moves.
-# One reading a minute from the worker, the last hour, same charger state.
+# ---- battery: the fuel gauge counts the current (mA, + charging, - using the
+# battery). Time left = charge left of the 1850 mAh the gauge also uses, over the
+# mean current of the last minutes. Kernels without the counter fall back to
+# how fast the charge (0.1 % steps) moves. One reading a minute from the worker.
 BAT=Path('/sys/class/power_supply/battery')
-BAT_WH=1.85*3.8   # 1850 mAh, 3.8 V
+FGU=Path('/sys/class/power_supply/sprdfgu/fgu_current')
+BAT_MAH=1850
+BAT_WH=BAT_MAH/1000*3.8
 BAT_HIST=[]
 def bat_read():
     rd=lambda n:(BAT/n).read_text().strip()
@@ -1128,20 +1131,27 @@ def bat_read():
         try:b['soc']=int(rd('batt_read_raw_soc'))/10
         except (OSError,ValueError):b['soc']=b['cap']
         if not 0<=b['soc']<=100:b['soc']=b['cap']
-        return b
     except (OSError,ValueError):return None
+    try:b['ma']=int(FGU.read_text().strip())
+    except (OSError,ValueError):b['ma']=None
+    if b['ma'] is not None and abs(b['ma'])<=1:b['ma']=None   # no counter: always 1
+    return b
 def bat_sample():
     b=bat_read();now=time.monotonic()
     if not b:return
     if BAT_HIST and BAT_HIST[-1][2]!=b['status']:BAT_HIST.clear()
-    BAT_HIST.append((now,b['soc'],b['status']))
+    BAT_HIST.append((now,b['soc'],b['status'],b['ma']))
     while now-BAT_HIST[0][0]>3600:BAT_HIST.pop(0)
 def bat_rate():
     # % per hour (+ charging, - discharging); None while it cannot be told yet
     if len(BAT_HIST)<2:return None
-    (t0,s0,_),(t1,s1,_)=BAT_HIST[0],BAT_HIST[-1]
+    (t0,s0,*_),(t1,s1,*_)=BAT_HIST[0],BAT_HIST[-1]
     if t1-t0<600 or abs(s1-s0)<.5:return None
     return (s1-s0)*3600/(t1-t0)
+def bat_mean_ma(b):
+    # this reading and the last 10 minutes with the same charger state
+    now=time.monotonic();m=[x[3] for x in BAT_HIST if x[2]==b['status'] and x[3] is not None and now-x[0]<=600]+[b['ma']]
+    return sum(m)/len(m)
 def duration(h):
     m=round(h*60)
     return '%d min'%m if m<60 else '%d h %02d min'%(m//60,m%60)
@@ -1150,28 +1160,42 @@ def bat_info():
     # [(name, value, colour)]: the Batería screen and the web panel's section
     b=bat_read()
     if not b:return []
-    st=b['status'];r=bat_rate();t=b['temp']
+    st=b['status'];t=b['temp'];ma=b['ma']
     out=[('Carga','%d%%'%b['cap'],'r' if b['cap']<=15 else 'y' if b['cap']<=30 else 'g'),
          ('Estado',{'Charging':'cargando','Full':'cargada, con el cargador puesto','Discharging':'sin cargador, usando la batería'}.get(st,'cargador puesto, sin cargar'),'y' if st=='Discharging' else 'g'),
          ('Temperatura','%.1f °C'%t,'r' if t>=55 else 'y' if t>=45 else 'g'),('Voltaje','%.2f V'%b['v'],'y' if b['v']<3.6 else 'g')]
-    if st=='Discharging':
+    if ma is not None:
+        mean=bat_mean_ma(b)
+        if st=='Discharging' and ma<0:
+            out.append(('Consumo','%d mA (%.2f W)'%(-ma,-ma*b['v']/1000),'y'))
+            if mean<0:out.append(('Tiempo restante','unas '+duration(b['soc']/100*BAT_MAH/-mean),'y'))
+        elif st=='Charging' and ma>0:
+            out.append(('Corriente de carga','%d mA'%ma,'g'))
+            out.append(('Llena en','casi llena' if mean<100 or b['v']>=4.3 else 'unas '+duration((100-b['soc'])/100*BAT_MAH/mean),'g'))
+    elif st=='Discharging':
+        r=bat_rate()
         if r and r<0:out+=[('Tiempo restante','unas '+duration(b['soc']/-r),'y'),('Consumo','aprox. %.1f W (%.1f %% por hora)'%(-r/100*BAT_WH,-r),'y')]
         elif len(BAT_HIST)>1 and BAT_HIST[-1][0]-BAT_HIST[0][0]>=3000:out.append(('Tiempo restante','más de 1 día (consumo muy bajo)','g'))
         else:out.append(('Tiempo restante','calculando (unos 10 min)','m'))
-    elif st=='Charging' and r and r>0:out.append(('Llena en','unas '+duration((100-b['soc'])/r),'g'))
+    elif st=='Charging':
+        r=bat_rate()
+        if r and r>0:out.append(('Llena en','unas '+duration((100-b['soc'])/r),'g'))
     try:h=(BAT/'health').read_text().strip();out.append(('Salud',BAT_HEALTH.get(h,'desconocida'),'g' if h=='Good' else 'r'))
     except OSError:pass
     return out
-BAT_NOTE='El J1 no mide la corriente: el tiempo restante y el consumo se calculan por lo que baja la carga sin cargador (última hora).'
+def bat_note():
+    b=bat_read()
+    if b and b['ma'] is not None:return 'Consumo medido por el chip de la batería. El tiempo restante usa la corriente media de los últimos 10 minutos y la capacidad de fábrica (%d mAh); con una batería gastada durará menos.'%BAT_MAH
+    return 'Sin medida de corriente: el tiempo restante y el consumo se calculan por lo que baja la carga sin cargador (última hora).'
 def ui_bat(arg):
     s=Screen('bat','Batería',refresh=30);info=bat_info()
     if not info:return s.label('No se puede leer la batería.','r')
     for n,v,c in info:s.label('%s: %s'%(n,v),c)
-    return s.small(BAT_NOTE,'m')
+    return s.small(bat_note(),'m')
 def bat_section():
     info=bat_info()
     return ('<section id=bat><h2>Batería</h2>'+(''.join('<p class=kv>'+('<span class="dot '+c+'"></span>' if c in 'gyr' else '')+'<span>'+esc(n)+': <b>'+esc(v)+'</b></span></p>' for n,v,c in info) if info else '<p>No se puede leer la batería.</p>')+
-            '<p class=muted>'+esc(BAT_NOTE)+'</p></section>')
+            '<p class=muted>'+esc(bat_note())+'</p></section>')
 
 def ui_res(arg):
     s=Screen('res','Recursos',refresh=3)
