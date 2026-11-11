@@ -1156,7 +1156,6 @@ def bat_info():
         elif len(BAT_HIST)>1 and BAT_HIST[-1][0]-BAT_HIST[0][0]>=3000:out.append(('Tiempo restante','más de 1 día (consumo muy bajo)','g'))
         else:out.append(('Tiempo restante','calculando (unos 10 min)','m'))
     elif st=='Charging' and r and r>0:out.append(('Llena en','unas '+duration((100-b['soc'])/r),'g'))
-    else:out.append(('Tiempo restante','sin límite mientras esté el cargador','g'))
     try:h=(BAT/'health').read_text().strip();out.append(('Salud',BAT_HEALTH.get(h,'desconocida'),'g' if h=='Good' else 'r'))
     except OSError:pass
     return out

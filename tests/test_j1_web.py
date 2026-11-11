@@ -356,7 +356,7 @@ class Tests(unittest.TestCase):
    # charger plugged: the discharge history no longer counts
    put(status='Charging');now.return_value=1780;app.bat_sample();self.assertEqual(len(app.BAT_HIST),1)
    self.assertEqual(app.bat_info()[1],('Estado','cargando','g'))
-   put(status='Full',capacity='100',batt_read_raw_soc='1000');self.assertEqual(app.bat_info()[4],('Tiempo restante','sin límite mientras esté el cargador','g'))
+   put(status='Full',capacity='100',batt_read_raw_soc='1000');self.assertNotIn('Tiempo restante',[n for n,v,c in app.bat_info()])
    # its own tile and web section; not on the home status lines
    home=app.ui_request(b'a=nav%3Ahome');self.assertIn(b'C\tnav:bat\tBater',home);self.assertNotIn(b'Carga',home)
    self.assertIn('href="#bat"',app.home_html());self.assertNotIn('Tiempo restante',app.home_html())
