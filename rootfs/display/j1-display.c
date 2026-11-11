@@ -1115,7 +1115,7 @@ static void key(int c) {
 	if (locked) return;
 	if (c == KEY_VOLUMEUP) { scroll -= 300; clamp_scroll(); render(); }
 	else if (c == KEY_VOLUMEDOWN) { scroll += 300; clamp_scroll(); render(); }
-	else if (c == KEY_HOME) { kb_open = 0; send_action("nav:home", 0); }
+	else if (c == KEY_HOME) { kb_open = 0; if (!back[0] && page) { page = page_dx = 0; scroll = 0; render(); } else send_action("nav:home", 0); }   /* on the home screen: first page */
 	else if (c == KEY_BACK) { if (kb_open) { kb_open = 0; render(); } else if (back[0]) send_action(back, 0); else if (page) { page = 0; render(); } }
 	else if (c == KEY_RECENTS) { kb_open = 0; send_action("nav:res", 0); }
 }
