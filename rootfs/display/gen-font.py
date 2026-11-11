@@ -22,7 +22,7 @@ TEXT = (('f_sm', 'Inter-Regular.ttf', 18, None),     # small print
         ('f_xl', 'Inter-Light.ttf', 112, '0123456789:'))   # lock screen clock
 # screen name -> Material Icons name
 ICONS = (('wifi', 'wifi'), ('ap', 'wifi_tethering'), ('vpn', 'verified_user'), ('dns', 'cloud'),
-         ('usb', 'settings_ethernet'), ('res', 'insights'), ('disp', 'light_mode'), ('logs', 'article'),
+         ('usb', 'settings_ethernet'), ('res', 'insights'), ('bat', 'battery_full'), ('disp', 'light_mode'), ('logs', 'article'),
          ('sys', 'settings'), ('qr', 'qr_code_2'), ('ip', 'lan'), ('user', 'person'),
          ('power', 'power_settings_new'), ('speed', 'speed'), ('tz', 'schedule'), ('lock', 'lock'), ('panel', 'language'), ('cam', 'photo_camera'), ('camswitch', 'flip_camera_android'), ('camtune', 'tune'),
          ('more', 'chevron_right'), ('back', 'arrow_back_ios_new'))
@@ -77,7 +77,7 @@ icons(out)
 
 # the web panel uses the same icons, as inline SVG paths in web.py (between markers)
 WEB_ICONS = (('wifi', 'wifi'), ('cable', 'settings_ethernet'), ('vpn', 'verified_user'), ('dns', 'cloud'),
-             ('key', 'key'), ('ap', 'wifi_tethering'), ('lock', 'lock'), ('tz', 'schedule'), ('ssh', 'terminal'),
+             ('key', 'key'), ('ap', 'wifi_tethering'), ('lock', 'lock'), ('tz', 'schedule'), ('ssh', 'terminal'), ('bat', 'battery_full'),
              ('download', 'download'), ('user', 'person'))
 def web_icons():
     from fontTools.pens.svgPathPen import SVGPathPen

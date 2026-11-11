@@ -474,7 +474,7 @@ static void render_lock(void) {
 static uint32_t icon_color(const char *name) {
 	static const struct { const char *n; unsigned char r, g, b; } P[] = {
 		{"wifi", 48, 209, 88}, {"ap", 100, 210, 255}, {"vpn", 255, 159, 10}, {"dns", 10, 132, 255},
-		{"usb", 191, 90, 242}, {"res", 255, 55, 95}, {"disp", 255, 214, 10}, {"logs", 94, 92, 230},
+		{"usb", 191, 90, 242}, {"res", 255, 55, 95}, {"bat", 52, 199, 89}, {"disp", 255, 214, 10}, {"logs", 94, 92, 230},
 		{"sys", 152, 152, 157}, {"qr", 235, 235, 245}, {"ip", 100, 210, 255}, {"user", 10, 132, 255},
 		{"power", 255, 69, 58}, {"panel", 90, 200, 250}, {"speed", 48, 209, 88}, {"tz", 255, 159, 10}, {"lock", 152, 152, 157}, {"cam", 235, 235, 245}};
 	for (size_t i = 0; name && i < sizeof P / sizeof P[0]; i++) if (!strcmp(P[i].n, name)) return color(P[i].r, P[i].g, P[i].b);

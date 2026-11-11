@@ -16,7 +16,7 @@ a{color:var(--acc);text-decoration:none}p{margin:8px 0}h3{font-size:13px;font-we
 .ic{width:20px;height:20px;fill:currentColor;flex:none}
 .bar{display:flex;align-items:center;gap:12px;height:60px}.bar h1{flex:1;margin:0;font-size:21px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .clock{font-size:15px;font-weight:600}.bat{font-size:15px;font-weight:600;color:var(--grn)}.bat.low{color:var(--red)}
-.status p{display:flex;align-items:center;gap:10px;margin:7px 0}.status .m{color:var(--mut)}
+.status p,p.kv{display:flex;align-items:center;gap:10px;margin:7px 0}.status .m{color:var(--mut)}
 .dot{width:10px;height:10px;border-radius:50%;flex:none}.dot.g{background:var(--grn)}.dot.y{background:var(--yel)}.dot.r{background:var(--red)}
 nav .t{display:flex;color:var(--txt)}
 .brand{color:var(--mut);font-size:14px;margin:4px 2px;line-height:1.5}
@@ -97,12 +97,13 @@ ICONS_SVG={
     'lock':'M322 341V384Q322 411 302.5 430.5Q283 450 256 450Q229 450 209.5 430.5Q190 411 190 384V341ZM226 162Q239 149 256 149Q273 149 286 162Q299 175 299 192Q299 209 286 222Q273 235 256 235Q239 235 226 222Q213 209 213 192Q213 175 226 162ZM384 341Q401 341 414 328.5Q427 316 427 299V85Q427 68 414 55.5Q401 43 384 43H128Q111 43 98 55.5Q85 68 85 85V299Q85 316 98 328.5Q111 341 128 341H149V384Q149 428 180.5 459.5Q212 491 256 491Q300 491 331.5 459.5Q363 428 363 384V341Z',
     'tz':'M267 363V251L363 194L347 167L235 235V363ZM135.5 135.5Q186 85 256 85Q326 85 376.5 135.5Q427 186 427 256Q427 326 376.5 376.5Q326 427 256 427Q186 427 135.5 376.5Q85 326 85 256Q85 186 135.5 135.5ZM105.5 406.5Q168 469 256 469Q344 469 406.5 406.5Q469 344 469 256Q469 168 406.5 105.5Q344 43 256 43Q168 43 105.5 105.5Q43 168 43 256Q43 344 105.5 406.5Z',
     'ssh':'M427 427H85Q68 427 55.5 414.5Q43 402 43 384V128Q43 110 55.5 97.5Q68 85 85 85H427Q444 85 456.5 97.5Q469 110 469 128V384Q469 402 456.5 414.5Q444 427 427 427ZM427 128H85V341H427ZM384 149H256V192H384ZM160 149 130 179 185 235 130 290 160 320 245 235Z',
+    'bat':'M334 427Q346 427 354.5 418.5Q363 410 363 398V71Q363 59 354.5 51Q346 43 334 43H178Q166 43 157.5 51Q149 59 149 71V398Q149 410 157.5 418.5Q166 427 178 427H213V469H299V427Z',
     'download':'M107 85H405V128H107ZM405 320H320V448H192V320H107L256 171Z',
     'user':'M427 128V85H85V128Q85 166 143.5 189.5Q202 213 256 213Q310 213 368.5 189.5Q427 166 427 128ZM316 281Q291 256 256 256Q221 256 196 281Q171 306 171 341Q171 376 196 401.5Q221 427 256 427Q291 427 316 401.5Q341 376 341 341Q341 306 316 281Z',
 }
 # ---- end of icons
 # each section: icon and color of its tile on the screen
-SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap','#64d2ff'),('vpn','WireGuard','vpn','#ff9f0a'),
+SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap','#64d2ff'),('bat','Batería','bat','#34c759'),('vpn','WireGuard','vpn','#ff9f0a'),
           ('dns','Cloudflare DNS','dns','#0a84ff'),('usb','Cable USB','cable','#bf5af2'),('clave','Contraseña del panel','key','#5ac8fa'),
           ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'))
 # moves the page dots of the phone home screen (the swipe itself is CSS)
@@ -578,7 +579,6 @@ def home_html():
          ('<span class="bat'+(' low' if bat<=15 else '')+'">%d%%</span>'%bat if bat is not None else '')+'</header><div class=status>']
     for r in ui_home().rows:
         if r[0]=='L':out.append('<p'+(' class=m' if r[2] not in 'gyr' else '')+'>'+('<span class="dot '+r[2]+'"></span>' if r[2] in 'gyr' else '')+esc(r[1])+'</p>')
-    for t,c in bat_lines()[1:]:out.append('<p'+(' class=m' if c not in 'gyr' else '')+'>'+('<span class="dot '+c+'"></span>' if c in 'gyr' else '')+esc(t)+'</p>')
     pages=[SECTIONS[i:i+6] for i in range(0,len(SECTIONS),6)]
     out.append('</div><nav class=pages>'+''.join('<div class=page>'+''.join('<a class=t href="#'+sid+'">'+icon(ic,color)+'<span>'+esc(name)+'</span></a>' for sid,name,ic,color in pg)+'</div>' for pg in pages)+'</nav>')
     out.append('<div class=dots>'+''.join('<i'+(' class=on' if i==0 else '')+'></i>' for i in range(len(pages)))+'</div><p class=brand>'+esc(BRAND)+'<br>'+REPO+'</p>')
@@ -593,7 +593,7 @@ def page(message='',error=False):
          '<div class=app id=top><aside class=root>'+home_html()+         '</aside><main>'+(note if message else '')]
     out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button class=sec>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
-    out+=['</select><details><summary>Red oculta o nombre manual</summary><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off></label></details><label>Contraseña Wi-Fi<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Guardar y conectar</button></form><p><small>La red de configuración se mantiene disponible.</small></p></section>',usb_section()]
+    out+=['</select><details><summary>Red oculta o nombre manual</summary><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off></label></details><label>Contraseña Wi-Fi<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Guardar y conectar</button></form><p><small>La red de configuración se mantiene disponible.</small></p></section>',usb_section(),bat_section()]
     out+=['<section id=vpn><h2>WireGuard</h2><p>'+esc(RUNTIME['vpn'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=vpn><label>Puerto UDP<input type=number name=port min=1 max=65535 required value="'+str(v['port'])+'"></label><label>Dominio o IP de conexión<input name=endpoint value="'+esc(v.get('endpoint',''))+'" placeholder="vpn2.tudominio.com"></label><small>Vacío: usa el dominio de Cloudflare o la IP de acceso actual. Web en TCP 80; VPN en UDP. Si cambias el puerto o dominio, descarga otra vez los perfiles.</small><br><button>Guardar puerto y dirección</button></form><h3>Clientes</h3><ul class=list>'+('' if v['clients'] else '<li><small>Ninguno todavía.</small></li>')]
     for c in v['clients']:
         out.append('<li><span class=tile>'+icon('user','#0a84ff')+'</span><span class=who><b>'+esc(c['name'])+'</b><small>10.66.0.'+str(c['ip'])+'</small></span>'
@@ -1001,7 +1001,7 @@ def tz_set(i):
     return name
 
 def ui_tz(arg):
-    cur=tz_get();s=Screen('tz','Zona horaria','nav:sys').label('Hora: '+time.strftime('%H:%M'),'g')
+    cur=tz_get();s=Screen('tz','Zona horaria').label('Hora: '+time.strftime('%H:%M'),'g')
     for i,(n,z) in enumerate(TZ_ZONES):s.button('tz.set:%d'%i,('> ' if z==cur else '')+n,'p' if z==cur else 'i')
     return s.small('El reloj de la pantalla, la web y los registros cambian al momento. El horario de verano es automático.','m')
 
@@ -1142,20 +1142,34 @@ def bat_rate():
 def duration(h):
     m=round(h*60)
     return '%d min'%m if m<60 else '%d h %02d min'%(m//60,m%60)
-def bat_lines():
-    # [(text, colour)] for Recursos and the web panel's home
+BAT_HEALTH={'Good':'buena','Overheat':'demasiado caliente','Cold':'demasiado fría','Dead':'agotada','Over voltage':'sobretensión'}
+def bat_info():
+    # [(name, value, colour)]: the Batería screen and the web panel's section
     b=bat_read()
     if not b:return []
-    out=[('Batería: %d%% · %.2f V · %.1f °C'%(b['cap'],b['v'],b['temp']),'r' if b['cap']<=15 else 'g')]
-    st=b['status'];r=bat_rate()
+    st=b['status'];r=bat_rate();t=b['temp']
+    out=[('Carga','%d%%'%b['cap'],'r' if b['cap']<=15 else 'y' if b['cap']<=30 else 'g'),
+         ('Estado',{'Charging':'cargando','Full':'cargada, con el cargador puesto','Discharging':'sin cargador, usando la batería'}.get(st,'cargador puesto, sin cargar'),'y' if st=='Discharging' else 'g'),
+         ('Temperatura','%.1f °C'%t,'r' if t>=55 else 'y' if t>=45 else 'g'),('Voltaje','%.2f V'%b['v'],'y' if b['v']<3.6 else 'g')]
     if st=='Discharging':
-        if r and r<0:out+=[('Sin cargador: quedan unas '+duration(b['soc']/-r),'y'),('Consumo aprox. %.1f W (%.1f %%/h)'%(-r/100*BAT_WH,-r),'m')]
-        elif len(BAT_HIST)>1 and BAT_HIST[-1][0]-BAT_HIST[0][0]>=3000:out.append(('Sin cargador: consumo muy bajo, más de 1 día','y'))
-        else:out.append(('Sin cargador: calculando lo que queda (unos 10 min)','y'))
-    elif st=='Charging':out.append(('Cargando'+(': llena en unas '+duration((100-b['soc'])/r) if r and r>0 else ''),'g'))
-    elif st=='Full':out.append(('Cargada, con el cargador puesto','g'))
-    else:out.append(('Cargador puesto, sin cargar','m'))
+        if r and r<0:out+=[('Tiempo restante','unas '+duration(b['soc']/-r),'y'),('Consumo','aprox. %.1f W (%.1f %% por hora)'%(-r/100*BAT_WH,-r),'y')]
+        elif len(BAT_HIST)>1 and BAT_HIST[-1][0]-BAT_HIST[0][0]>=3000:out.append(('Tiempo restante','más de 1 día (consumo muy bajo)','g'))
+        else:out.append(('Tiempo restante','calculando (unos 10 min)','m'))
+    elif st=='Charging' and r and r>0:out.append(('Llena en','unas '+duration((100-b['soc'])/r),'g'))
+    else:out.append(('Tiempo restante','sin límite mientras esté el cargador','g'))
+    try:h=(BAT/'health').read_text().strip();out.append(('Salud',BAT_HEALTH.get(h,'desconocida'),'g' if h=='Good' else 'r'))
+    except OSError:pass
     return out
+BAT_NOTE='El J1 no mide la corriente: el tiempo restante y el consumo se calculan por lo que baja la carga sin cargador (última hora).'
+def ui_bat(arg):
+    s=Screen('bat','Batería',refresh=30);info=bat_info()
+    if not info:return s.label('No se puede leer la batería.','r')
+    for n,v,c in info:s.label('%s: %s'%(n,v),c)
+    return s.small(BAT_NOTE,'m')
+def bat_section():
+    info=bat_info()
+    return ('<section id=bat><h2>Batería</h2>'+(''.join('<p class=kv>'+('<span class="dot '+c+'"></span>' if c in 'gyr' else '')+'<span>'+esc(n)+': <b>'+esc(v)+'</b></span></p>' for n,v,c in info) if info else '<p>No se puede leer la batería.</p>')+
+            '<p class=muted>'+esc(BAT_NOTE)+'</p></section>')
 
 def ui_res(arg):
     s=Screen('res','Recursos',refresh=3)
@@ -1177,7 +1191,6 @@ def ui_res(arg):
         s.label('RAM libre: %d de %d MB'%(mem.get('MemAvailable',mem['MemFree']+mem.get('Cached',0))//1024,mem['MemTotal']//1024))
         d=os.statvfs('/');s.label('Disco libre: %d MB'%(d.f_bavail*d.f_frsize//1048576))
     except (OSError,KeyError,ValueError):pass
-    for t,c in bat_lines():s.label(t,c)
     return s.small('% de CPU sobre el total de los 2 núcleos (el segundo solo se enciende con carga). Esta vista solo mide mientras está abierta.','m')
 
 BRAND='J1 Open VPN · © 2026 Farweb'
@@ -1192,7 +1205,7 @@ def ui_home():
     s.label('DNS: '+RUNTIME['ddns'],'g' if RUNTIME['ddns'].startswith('Actualizado') else 'm')
     s.label('Red config: apagada' if (STATE/'ap-off').exists() else readrun('ap-name')+' · '+readrun('ap-password'),'m')
     for a,t in (('wifi','Wi-Fi'),('ap','Red de configuración'),('vpn','WireGuard'),('dns','Cloudflare DNS'),('usb','Cable USB'),
-                ('speed','Velocidad'),('panel','Panel web'),('res','Recursos'),('disp','Pantalla'),('logs:sys','Registros'),('sys','Sistema')):
+                ('speed','Velocidad'),('panel','Panel web'),('res','Recursos'),('bat','Batería'),('disp','Pantalla'),('tz','Zona horaria'),('logs:sys','Registros'),('sys','Sistema')):
         s.tile('nav:'+a,t,a.split(':')[0])
     return s.small(BRAND,'m').small(REPO,'m')
 
@@ -1383,8 +1396,6 @@ def ui_sys(arg):
         s.label('RAM libre: %d / %d MB'%(mem.get('MemAvailable',mem.get('MemFree',0))//1024,mem['MemTotal']//1024))
     except (OSError,KeyError,ValueError):pass
     s.label('Kernel '+os.uname().release,'m').small(BRAND,'m').small(REPO,'m')
-    s.button('nav:tz','Zona horaria: '+tz_name(),'i')
-    s.button('nav:speed:sys','Prueba de velocidad','i')
     return s.button('nav:reboot','Reiniciar J1','d','power').button('nav:poweroff','Apagar J1','d','power')
 
 # speed test through whatever link has the route (cable or Wi-Fi), in the background
@@ -1446,19 +1457,17 @@ def speed_start():
 
 def ui_speed(arg):
     with LOCK:sp=dict(SPEED)
-    # back goes where it was opened from: the home tile or Sistema (arg sys)
-    o=':sys' if arg=='sys' else ''
-    s=Screen('speed'+o,'Velocidad','nav:sys' if o else 'nav:home',refresh=1 if sp.get('running') else 0)
+    s=Screen('speed','Velocidad',refresh=1 if sp.get('running') else 0)
     if not sp:
         s.label('Mide la conexión a Internet por el enlace que esté usando el J1 (cable o Wi-Fi).')
         s.small('Tarda unos 25 s y gasta unos 100-200 MB de datos.','m')
-        return s.button('speed.run'+o,'Empezar','p')
+        return s.button('speed.run','Empezar','p')
     for k,n in (('link','Por'),('ping','Ping'),('down','Bajada'),('up','Subida')):
         if k in sp:s.label('%s: %s'%(n,sp[k]),'y' if sp[k]=='midiendo...' else 'n')
     if sp.get('error'):s.label(sp['error'],'r')
     if sp.get('running'):return s.small('Midiendo...','m')
     s.small('Para la VPN cuenta sobre todo la subida: es lo que el J1 puede enviar a tus dispositivos fuera de casa.','m')
-    return s.button('speed.run'+o,'Repetir','i')
+    return s.button('speed.run','Repetir','i')
 
 def ui_reboot(arg):
     return (Screen('reboot','Reiniciar','nav:sys').label('¿Reiniciar el J1? La VPN se corta durante un minuto.','y')
@@ -1476,7 +1485,7 @@ def ui_power(arg):
 
 UI_SCREENS={'home':lambda a:ui_home(),'wifi':ui_wifi,'wifinet':ui_wifinet,'wifihidden':ui_wifihidden,'ap':ui_ap,
     'ip':ui_ip,'vpn':ui_vpn,'client':ui_client,'qr':ui_qr,'del':ui_del,'dns':ui_dns,'usb':ui_usb,'logs':ui_logs,
-    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz,'panel':ui_panel,'camqr':ui_camqr}
+    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz,'bat':ui_bat,'panel':ui_panel,'camqr':ui_camqr}
 
 def ui_action(a, f):
     """Runs a screen action; returns (next screen, message)."""
@@ -1522,7 +1531,7 @@ def ui_action(a, f):
         t=int(arg) if arg.isdigit() else -1
         if t not in dict(DISPLAY_TIMES):raise ValueError('Tiempo no válido')
         display_save(timeout=t);return 'disp','Guardado: '+dict(DISPLAY_TIMES)[t]
-    if verb=='speed.run':speed_start();return 'speed'+(':sys' if arg=='sys' else ''),None
+    if verb=='speed.run':speed_start();return 'speed',None
     if verb=='disp.lock':
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         had=display_pin() is not None

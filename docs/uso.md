@@ -20,12 +20,14 @@ Vistas del inicio:
 - **WireGuard:** puerto, dominio, UPnP, clientes (crear, ver última conexión y tráfico, **QR**, quitar).
 - **Cloudflare DNS:** DNS dinámico (ver abajo).
 - **Cable USB:** estado del adaptador de red, 5 V automáticos, IP del cable.
-- **Recursos:** CPU total y por proceso, RAM, disco, tráfico y temperatura.
+- **Recursos:** CPU total y por proceso, RAM, disco y tráfico.
+- **Batería:** carga, si está cargando, temperatura, voltaje, salud y, sin cargador, tiempo restante y consumo aproximado. También en el panel web, sección *Batería*. El J1 no mide la corriente: el tiempo y el consumo se calculan por lo que baja la carga (la primera estimación tarda unos 10 minutos tras quitar el cargador).
 - **Pantalla:** brillo (deslizador), pantalla de bloqueo y tiempo de apagado. En los últimos segundos se atenúa; un toque la recupera.
 - **Pantalla de bloqueo** (activada de serie; también se cambia en el panel web, sección *Pantalla de bloqueo*): cuando la pantalla se apaga, un toque o un botón solo muestran la hora y la batería, y hay que deslizar el círculo hasta el final para usarla. Así una mano apoyada encima no pulsa nada. Sin desbloquear vuelve a apagarse a los 10 s. Mantener el botón de encendido abre el menú de apagado igualmente (salvo con código).
 - **Código de desbloqueo** (opcional, en *Pantalla*, con la pantalla de bloqueo activada): de 4 a 8 cifras, escrito dos veces. Tras deslizar sale un teclado numérico. Con código el J1 arranca bloqueado y el botón de encendido no se salta el bloqueo. Intentos: los 4 primeros fallos seguidos solo avisan; del 5.º al 9.º hay que esperar 30 s, 1, 2, 4 y 8 min; al **10.º fallo seguido la pantalla se bloquea por completo** (no acepta ningún código, ni el correcto) hasta desbloquearla desde el panel web (*Pantalla de bloqueo* → *Desbloquear la pantalla*). El contador se guarda en disco: reiniciar no lo pone a cero. El J1 solo guarda un hash (PBKDF2 con sal): protege frente a quien toca la pantalla, no frente a quien extrae la memoria del teléfono (con 4-8 cifras se puede adivinar fuera del J1), así que mejor 6 cifras o más. **Si lo olvidas:** panel web → *Pantalla de bloqueo* → *Quitar el código de desbloqueo* (necesitas la clave del panel o tu clave SSH). Desactivar la pantalla de bloqueo también lo borra. En la pantalla, **quitar el código o desactivar el bloqueo pide el código actual** (los fallos cuentan igual que al desbloquear); desde el panel web se puede quitar sin él, por si se olvida.
 - **Registros:** sistema, red, VPN y kernel.
-- **Sistema:** encendido, carga, RAM, **zona horaria**, **prueba de velocidad**, reiniciar y apagar.
+- **Velocidad** y **Zona horaria:** cada una con su propio acceso en el inicio (ver abajo).
+- **Sistema:** encendido, carga, RAM, reiniciar y apagar.
 
 Con la pantalla apagada se borra la memoria de vídeo: un código QR no se queda guardado.
 
@@ -107,7 +109,7 @@ Así el router solo necesita una redirección de puerto.
 
 ## Prueba de velocidad
 
-**Sistema → Prueba de velocidad → Empezar.** Mide ping, bajada y subida contra `speed.cloudflare.com` por el enlace activo (cable o Wi-Fi). Tarda unos 25 s y gasta 100–200 MB. Para la VPN cuenta sobre todo la **subida**: es lo que el J1 puede enviar a tus dispositivos cuando estás fuera.
+**Velocidad → Empezar** (acceso en el inicio). Mide ping, bajada y subida contra `speed.cloudflare.com` por el enlace activo (cable o Wi-Fi). Tarda unos 25 s y gasta 100–200 MB. Para la VPN cuenta sobre todo la **subida**: es lo que el J1 puede enviar a tus dispositivos cuando estás fuera.
 
 Por Wi-Fi la VPN rinde menos de lo que marca la prueba: cada dato entra y sale por el mismo Wi-Fi.
 
@@ -115,7 +117,7 @@ Por Wi-Fi la VPN rinde menos de lo que marca la prueba: cada dato entra y sale p
 
 Viene la de España peninsular. Para cambiarla:
 
-- En la pantalla: **Sistema → Zona horaria** y toca la tuya.
+- En la pantalla: acceso **Zona horaria** del inicio y toca la tuya.
 - En el panel web: sección **Zona horaria** → elige y *Guardar zona horaria*.
 
 Zonas disponibles: España y Europa central, Canarias y Portugal, Reino Unido e Irlanda, Europa del este, México, Colombia/Perú/Ecuador, Venezuela/Bolivia, Chile, Argentina/Uruguay, EE. UU. este y pacífico, y UTC. El horario de verano es automático.

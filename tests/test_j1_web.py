@@ -96,7 +96,9 @@ class Tests(unittest.TestCase):
   old=os.environ.get('TZ')
   try:
    self.assertEqual(app.tz_get(),app.TZ_DEFAULT);self.assertEqual(app.tz_name(),'España, Europa central')
-   self.assertIn(b'nav:tz\tZona horaria: Espa',app.ui_request(b'a=nav%3Asys'))
+   # own home tile, no longer in Sistema; back goes home
+   self.assertIn(b'C\tnav:tz\tZona horaria\ttz\n',app.ui_request(b'a=nav%3Ahome'));self.assertNotIn(b'nav:tz',app.ui_request(b'a=nav%3Asys'))
+   self.assertTrue(app.ui_request(b'a=nav%3Atz').startswith(b'T\ttz\tZona horaria\tnav:home\n'))
    for bad in (b'tz.set%3A99',b'tz.set%3A-1',b'tz.set%3Ax'):self.assertIn(b'\te\n',app.ui_request(b'a='+bad+b'&s=tz'))
    out=app.ui_request(b'a=tz.set%3A1&s=tz');self.assertIn(b'> Canarias, Portugal\tp',out)
    self.assertEqual((app.STATE/'tz').read_text(),'WET0WEST,M3.5.0/1,M10.5.0\n');self.assertEqual(os.environ['TZ'],'WET0WEST,M3.5.0/1,M10.5.0')
@@ -132,10 +134,9 @@ class Tests(unittest.TestCase):
   app.SPEED.update(running=False,down='80.0 Mbit/s',up='20.0 Mbit/s');out=app.ui_request(b'a=nav%3Aspeed')
   self.assertIn(b'Subida: 20.0 Mbit/s\tn',out);self.assertIn(b'speed.run\tRepetir',out);self.assertNotIn(b'\nR\t',out)
   self.assertEqual(app.speed_mbit(10**7,8),'10.0 Mbit/s');app.SPEED.clear()
-  # back goes where it was opened from
+  # only its home tile opens it
   self.assertTrue(app.ui_request(b'a=nav%3Aspeed').startswith(b'T\tspeed\tVelocidad\tnav:home\n'))
-  out=app.ui_request(b'a=nav%3Aspeed%3Asys');self.assertTrue(out.startswith(b'T\tspeed:sys\tVelocidad\tnav:sys\n'));self.assertIn(b'speed.run:sys\tEmpezar',out)
-  self.assertIn(b'nav:speed:sys\t',app.ui_request(b'a=nav%3Asys'))
+  self.assertNotIn(b'speed',app.ui_request(b'a=nav%3Asys'))
  def test_display_timeout_line_and_setting(self):
   self.assertIn(b'\nO\t60\n',app.ui_request(b'a=nav%3Ahome'))
   out=app.ui_request(b'a=disp.set%3A0&s=disp');self.assertIn(b'\nO\t0\n',out);self.assertIn(b'> Siempre encendida\tp',out)
@@ -344,14 +345,21 @@ class Tests(unittest.TestCase):
    for k,x in dict(dict(capacity='80',status='Discharging',voltage_now='3900000',temp='275',batt_read_raw_soc='800'),**v).items():(bat/k).write_text(x+'\n')
   with patch.object(app,'BAT',bat),patch.object(app.time,'monotonic') as now:
    app.BAT_HIST.clear();put();now.return_value=1000;app.bat_sample()
-   lines=app.bat_lines();self.assertEqual(lines[0],('Batería: 80% · 3.90 V · 27.5 °C','g'));self.assertIn('calculando',lines[1][0])
+   (bat/'health').write_text('Good\n')
+   info=app.bat_info();self.assertEqual(info[:4],[('Carga','80%','g'),('Estado','sin cargador, usando la batería','y'),('Temperatura','27.5 °C','g'),('Voltaje','3.90 V','g')])
+   self.assertEqual(info[4],('Tiempo restante','calculando (unos 10 min)','m'));self.assertEqual(info[-1],('Salud','buena','g'))
    # 2 % in 12 min = 10 %/h: 78 % left lasts 7 h 48 min, 10 % of 7.03 Wh
    put(batt_read_raw_soc='780',capacity='78');now.return_value=1720;app.bat_sample()
-   self.assertEqual([t for t,c in app.bat_lines()[1:]],['Sin cargador: quedan unas 7 h 48 min','Consumo aprox. 0.7 W (10.0 %/h)'])
+   self.assertEqual(app.bat_info()[4:6],[('Tiempo restante','unas 7 h 48 min','y'),('Consumo','aprox. 0.7 W (10.0 % por hora)','y')])
+   out=app.ui_request(b'a=nav%3Abat').decode('cp437');self.assertIn('L\tTiempo restante: unas 7 h 48 min\ty',out);self.assertIn('no mide la corriente',out)
+   self.assertIn('Consumo: <b>aprox. 0.7 W',app.bat_section())
    # charger plugged: the discharge history no longer counts
    put(status='Charging');now.return_value=1780;app.bat_sample();self.assertEqual(len(app.BAT_HIST),1)
-   self.assertEqual(app.bat_lines()[1],('Cargando','g'))
-   put(status='Full',capacity='100',batt_read_raw_soc='1000');self.assertEqual(app.bat_lines()[1][0],'Cargada, con el cargador puesto')
-   (bat/'capacity').unlink();self.assertEqual(app.bat_lines(),[])
+   self.assertEqual(app.bat_info()[1],('Estado','cargando','g'))
+   put(status='Full',capacity='100',batt_read_raw_soc='1000');self.assertEqual(app.bat_info()[4],('Tiempo restante','sin límite mientras esté el cargador','g'))
+   # its own tile and web section; not on the home status lines
+   home=app.ui_request(b'a=nav%3Ahome');self.assertIn(b'C\tnav:bat\tBater',home);self.assertNotIn(b'Carga',home)
+   self.assertIn('href="#bat"',app.home_html());self.assertNotIn('Tiempo restante',app.home_html())
+   (bat/'capacity').unlink();self.assertEqual(app.bat_info(),[]);self.assertIn('No se puede leer',app.bat_section())
   app.BAT_HIST.clear()
 if __name__=='__main__':unittest.main(verbosity=2)
