@@ -285,21 +285,36 @@ class Tests(unittest.TestCase):
    with self.assertRaises(ValueError):app.qr_wifi_parse(bad)
  def test_wifi_from_camera_qr(self):
   class Proc:
-   def __init__(self,rc,out):self.returncode=rc;self.out=out
+   def __init__(self,rc,out):self.returncode=rc;self.out=out;self.signals=[]
    def communicate(self,timeout=None):return self.out,b''
-   def terminate(self):pass
+   def terminate(self):self.signals.append('TERM')
+   def send_signal(self,sig):self.signals.append(sig)
+  def wait():
+   for _ in range(200):
+    if not app.CAMQR.get('running'):return
+    app.time.sleep(0.01)
   app.CAMQR.clear()
   with patch.object(app.subprocess,'run'),patch.object(app.subprocess,'Popen',return_value=Proc(0,b'WIFI:T:WPA;S:Casa;P:secreta123;;')) as po:
-   app.camqr_start('rear')
-   for _ in range(100):
-    if not app.CAMQR.get('running'):break
-    app.time.sleep(0.01)
-  self.assertEqual(po.call_args.args[0][1:3],['qr','rear'])
-  out=app.ui_request(b'a=nav%3Awifiscan');self.assertIn(b'Casa',out);self.assertIn(b'camqr.join',out);self.assertNotIn(b'secreta123',out)
-  out=app.ui_request(b'a=camqr.join');self.assertIn(b'Red Casa guardada',out)
-  self.assertIn('ssid='+b'Casa'.hex(),(app.STATE/'wifi.conf').read_text());self.assertEqual(app.CAMQR,{})
-  with patch.object(app.subprocess,'run'),patch.object(app.subprocess,'Popen',return_value=Proc(1,b'')):app.CAMQR.update(running=True,cam='front');app.camqr_run('front')
-  self.assertIn(b'No se ha visto',app.ui_request(b'a=nav%3Awifiscan'))
-  self.assertIn(b'\te\n',app.ui_request(b'a=camqr.start%3Aside&s=wifiscan'))
-  self.assertIn(b'\te\n',app.ui_request(b'a=camqr.join&s=wifiscan'))
+   out=app.ui_request(b'a=camqr.start%3Arear');wait()
+  self.assertIn(b'T\tcamqr\t',out);self.assertEqual(po.call_args.args[0][1:3],['qr','rear'])
+  # read: saved and connecting at once, the password never on the screen
+  self.assertIn('ssid='+b'Casa'.hex(),(app.STATE/'wifi.conf').read_text())
+  out=app.ui_request(b'a=nav%3Acamqr');self.assertIn(b'T\twifi\t',out);self.assertIn(b'Red Casa guardada',out);self.assertNotIn(b'secreta123',out)
+  self.assertIn(b'T\tcamqr\t',app.ui_request(b'a=nav%3Acamqr'))   # the message only once
+  # running: full screen camera, tap focuses the rear one, the screen stays on
+  app.CAMQR.clear();p=Proc(0,b'');app.CAMQR.update(running=True,cam='rear',gen=7,proc=p)
+  out=app.ui_request(b'a=camqr.focus');self.assertIn(b'X\tcamqr.focus\tcamqr.switch\t',out);self.assertIn(b'\nO\t0\n',out);self.assertEqual(p.signals,[app.signal.SIGUSR1])
+  # switching camera stops this one and starts the other
+  with patch.object(app.threading,'Thread') as th:app.ui_request(b'a=camqr.switch')
+  self.assertEqual(p.signals[-1],'TERM');self.assertEqual(app.CAMQR['cam'],'front');self.assertEqual(th.call_args.kwargs['args'],('front',8))
+  # leaving the camera screen (Home) turns it off
+  q=Proc(0,b'');app.CAMQR.update(proc=q);app.ui_request(b'a=nav%3Ahome');self.assertEqual(q.signals,['TERM'])
+  # nothing seen: tap to try again; an older run cannot overwrite a newer one
+  app.CAMQR.clear();app.CAMQR.update(running=True,cam='front',gen=3)
+  with patch.object(app.subprocess,'run'),patch.object(app.subprocess,'Popen',return_value=Proc(1,b'')):app.camqr_run('front',2);self.assertTrue(app.CAMQR['running']);app.camqr_run('front',3)
+  out=app.ui_request(b'a=nav%3Acamqr');self.assertIn(b'X\tcamqr.start:front\tcamqr.switch\tNo se ha visto',out)
+  with patch.object(app.subprocess,'run'),patch.object(app.subprocess,'Popen',return_value=Proc(0,b'https://example.com')):
+   app.CAMQR.update(running=True,gen=4);app.camqr_run('rear',4)
+  self.assertIn(b'no es de una red Wi-Fi',app.ui_request(b'a=nav%3Acamqr'))
+  self.assertIn(b'\te\n',app.ui_request(b'a=camqr.start%3Aside&s=camqr'))
 if __name__=='__main__':unittest.main(verbosity=2)

@@ -204,14 +204,14 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 	(*rows)++;
 	int m = (SW - 2 * PAD) / (*cols + 8); return m > 8 ? 8 : m < 1 ? 1 : m;
 }
-/* camera preview (W): j1-camera writes each frame to PV_FILE, 240x320 RGB,
- * already upright; shown 300x400. While it is on screen only its area is
- * painted again, about 8 times a second, without asking web.py */
+/* camera screen (X): the picture fills the screen, with back, switch camera
+ * and a hint drawn over it. j1-camera writes each frame to PV_FILE, 240x320
+ * RGB, already upright; the screen paints it about 8 times a second without
+ * asking web.py. X fields: tap action (- none), switch action, hint, hint
+ * color (n: the camera is starting) */
 #define PV_FILE "/run/j1-camera.preview"
 #define PV_W 240
 #define PV_H 320
-#define PV_SHOW_W 300
-#define PV_SHOW_H 400
 static uint8_t pv[PV_W * PV_H * 3];
 static int pv_ok;
 static struct timespec pv_time;
@@ -238,7 +238,6 @@ static int el_h(struct el *e, int w) {
 	case 'F': return 22 + 54 + 12;
 	case 'G': return 18;
 	case 'Q': { int c, r, m = qr_dims(e->a, &c, &r); return (r + 8) * m + 12; }
-	case 'W': return PV_SHOW_H + 12;
 	}
 	return 0;
 }
@@ -481,23 +480,55 @@ static uint32_t icon_color(const char *name) {
 	for (size_t i = 0; name && i < sizeof P / sizeof P[0]; i++) if (!strcmp(P[i].n, name)) return color(P[i].r, P[i].g, P[i].b);
 	return C_ACC;
 }
-static void draw_preview(int y) {
-	int x0 = (SW - PV_SHOW_W) / 2;
-	if (!pv_ok) {
-		rrect(x0, y, PV_SHOW_W, PV_SHOW_H, 16, C_ITM);
-		text_mid(SW / 2, y + PV_SHOW_H / 2 - 12, "Encendiendo la c\xa0mara...", 1, C_MUT);
-		return;
+static int cam_el(void) { for (int i = 0; i < nel; i++) if (els[i].t == 'X') return i; return -1; }
+#define CAM_BTN 64
+static void cam_back_pos(int *x, int *y) { *x = 16; *y = 16; }
+static void cam_switch_pos(int *x, int *y) { *x = SW - CAM_BTN - 28; *y = SH - CAM_BTN - 36; }
+static int in_btn(int x, int y, int bx, int by) { return x >= bx - 16 && x < bx + CAM_BTN + 16 && y >= by - 16 && y < by + CAM_BTN + 16; }
+static double focus_at; static int focus_x, focus_y;
+static void render_camera(const struct el *e) {
+	buf = backbuf; clip0 = 0; clip1 = SH;
+	const char *hint = e->c ? e->c : "", *kind = e->d ? e->d : "n";
+	/* the picture, cropped at the sides to fill the screen (600x800 from 240x320) */
+	int fw = SH * PV_W / PV_H, cx = (fw - SW) / 2;
+	if (pv_ok) {
+		static uint32_t row[PV_W];
+		for (int y = 0; y < SH; y++) {
+			const uint8_t *src = pv + (size_t)(y * PV_H / SH) * PV_W * 3;
+			if (y == 0 || y * PV_H / SH != (y - 1) * PV_H / SH)
+				for (int c = 0; c < PV_W; c++) row[c] = color(src[c * 3], src[c * 3 + 1], src[c * 3 + 2]);
+			uint32_t *d = buf + (size_t)y * stride;
+			for (int x = 0; x < SW; x++) d[x] = row[(x + cx) * PV_W / fw];
+		}
+	} else {
+		fill(0, 0, SW, SH, C_BLACK);
+		if (*kind == 'n') text_mid(SW / 2, SH / 2 - 12, "Encendiendo la c\xa0mara...", 1, C_MUT);
 	}
-	for (int r = 0; r < PV_SHOW_H; r++) {
-		int yy = y + r; if (yy < clip0 || yy >= clip1) continue;
-		const uint8_t *src = pv + (size_t)(r * PV_H / PV_SHOW_H) * PV_W * 3;
-		uint32_t *d = buf + (size_t)yy * stride + x0;
-		for (int c = 0; c < PV_SHOW_W; c++) { const uint8_t *s = src + c * PV_W / PV_SHOW_W * 3; d[c] = color(s[0], s[1], s[2]); }
+	/* hint on a dark pill at the top, between the back button and the edge */
+	int hx = 16 + CAM_BTN + 12, hw = SW - hx - 16, hy = 16 + (CAM_BTN - 48) / 2;
+	int lines = wrap(hint, 0, 0, hw - 32, 1, 0, 0) > LINE(1) ? 2 : 1, hh = lines > 1 ? 66 : 48;
+	rrect(hx, hy, hw, hh, 24, color(28, 28, 30));
+	wrap2(hint, hx + 16, hy + (hh - lines * LINE(1)) / 2 - 2, hw - 32, 1, tcolor(kind), 1, 1);
+	/* back and switch camera: round buttons */
+	int bx, by; cam_back_pos(&bx, &by);
+	rrect(bx, by, CAM_BTN, CAM_BTN, CAM_BTN / 2, pressed == -2 ? C_DOWN : color(28, 28, 30));
+	icon_sz(bx + (CAM_BTN - 30) / 2 - 2, by + (CAM_BTN - 30) / 2, icon_id("back"), 0, C_WHITE);
+	if (e->b && *e->b) {
+		cam_switch_pos(&bx, &by);
+		rrect(bx, by, CAM_BTN, CAM_BTN, CAM_BTN / 2, pressed == -3 ? C_DOWN : color(28, 28, 30));
+		icon_sz(bx + (CAM_BTN - 30) / 2, by + (CAM_BTN - 30) / 2, icon_id("camswitch"), 0, C_WHITE);
 	}
+	/* where the finger asked to focus, for a second */
+	if (focus_at && now() - focus_at < 1.0) {
+		int s = 96, x = focus_x - s / 2, y = focus_y - s / 2; uint32_t c = C_YEL;
+		fill(x, y, s, 3, c); fill(x, y + s - 3, s, 3, c); fill(x, y, 3, s, c); fill(x + s - 3, y, 3, s, c);
+	}
+	if (busy) { rrect(60, SH / 2 - 50, SW - 120, 100, 20, C_BTN); text_mid(SW / 2, SH / 2 - 16, "Un momento...", 2, C_WHITE); }
+	present();
 }
-static int preview_el(void) { for (int i = 0; i < nel; i++) if (els[i].t == 'W') return i; return -1; }
 static void render(void) {
 	if (locked) { render_lock(); return; }
+	int ce = cam_el(); if (ce >= 0) { render_camera(&els[ce]); return; }
 	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
 	clip0 = TOP; clip1 = TOP + view_h();
 	int w = SW - 2 * PAD;
@@ -582,7 +613,6 @@ static void render(void) {
 			else text(PAD + 12, y + 33, s, 2, C_WHITE);
 			if (editing) fill(PAD + 13 + tw(s, 2), y + 35, 2, 30, C_ACC);   /* cursor */
 			break; }
-		case 'W': draw_preview(y); break;
 		case 'Q': {
 			int c, r, m = qr_dims(e->a, &c, &r), qw = (c + 8) * m, x0 = (SW - qw) / 2;
 			rrect(x0, y, qw, (r + 8) * m, 12, C_WHITE);
@@ -845,6 +875,11 @@ static void touch_down(int x, int y) {
 	if (locked && lock_stage) { pin_down = pin_key_at(x, y); render(); return; }
 	if (locked) { lock_drag = y > lock_y() - 30 && y < lock_y() + LK_H + 30 && x < PAD + 4 + LK_K + 40; lock_x = 0; return; }
 	if (kb_open && y >= KBY - PVH) { kb_down = kb_hit(x, y); pressed = t_el = -1; }
+	else if (cam_el() >= 0) {
+		int bx, by; const struct el *e = &els[cam_el()]; pressed = t_el = -1;
+		cam_back_pos(&bx, &by); if (in_btn(x, y, bx, by)) pressed = -2;
+		cam_switch_pos(&bx, &by); if (e->b && *e->b && in_btn(x, y, bx, by)) pressed = -3;
+	}
 	else pressed = t_el = hit(x, y);
 	if (sliding()) { pressed = -1; last_drag_render = 0; slide(x); return; }
 	render();
@@ -907,6 +942,19 @@ static void touch_up(int x, int y) {
 		return;
 	}
 	int tap = t_maxd < TAP_MOVE && dur < TAP_TIME;
+	int ce = cam_el();
+	if (ce >= 0) {   /* camera: back, switch, or a tap on the picture (focus / start again) */
+		int was = pressed; pressed = -1;
+		if (!tap) { render(); return; }
+		if (was == -2) { send_action(back, 0); return; }
+		if (was == -3) { char a[64]; snprintf(a, sizeof a, "%s", els[ce].b); send_action(a, 0); return; }
+		if (els[ce].a[0] && strcmp(els[ce].a, "-")) {
+			char a[64]; snprintf(a, sizeof a, "%s", els[ce].a);
+			if (!strncmp(a, "camqr.focus", 11)) { focus_at = now(); focus_x = x; focus_y = y; }
+			send_action(a, 0); return;
+		}
+		render(); return;
+	}
 	if (dragging && !tap) {
 		dragging = 0; render();
 		if (debug) fprintf(stderr, "%.3f arrastre %d px %.0f ms\n", now(), t_maxd, dur * 1000);
@@ -1052,16 +1100,13 @@ int main(void) {
 			timeout = t - now() > 3600 ? 3600000 : (int)((t - now()) * 1000) + 5; if (timeout < 0) timeout = 0;
 		}
 		if (pwr_at) { int w = (int)((pwr_at + PWR_LONG - now()) * 1000) + 5; if (w < 0) w = 0; if (timeout < 0 || w < timeout) timeout = w; }
-		int pvi = shown && !dimmed && !locked ? preview_el() : -1;
-		if (pvi >= 0 && (timeout < 0 || timeout > 120)) timeout = 120;
+		int cam = shown && !dimmed && !locked && cam_el() >= 0;
+		if (cam && (timeout < 0 || timeout > 120)) timeout = 120;
 		poll(p, 2, timeout);
-		if (pvi >= 0 && pvi == preview_el() && !kb_open && !busy && !t_down && pv_load()) {
-			int y = TOP + els[pvi].y - scroll, y0 = y < TOP ? TOP : y, y1 = y + PV_SHOW_H;
-			if (y1 > TOP + view_h()) y1 = TOP + view_h();
-			buf = backbuf; clip0 = TOP; clip1 = TOP + view_h();
-			draw_preview(y);
-			clip0 = 0; clip1 = SH;
-			for (int r = y0; r < y1; r++) memcpy(mem + (size_t)r * f.line_length, (unsigned char *)backbuf + (size_t)r * f.line_length, f.line_length);
+		if (cam && cam_el() >= 0 && !busy) {
+			int fresh = pv_load(), focus_gone = focus_at && now() - focus_at >= 1.0;
+			if (focus_gone) focus_at = 0;
+			if (fresh || focus_gone) render();
 		}
 		if (p[0].revents & POLLIN) key_events(1);
 		if (p[1].revents & POLLIN) touch_events(1);

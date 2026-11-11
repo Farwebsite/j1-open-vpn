@@ -7,6 +7,8 @@
  * 240x320 RGB, upright (the sensors are mounted at 90 and 270 degrees) and,
  * for the front camera, mirrored like a selfie.
  *
+ * SIGUSR1 focuses the rear camera again (tap on the picture).
+ *
  * Exit status: 0 done, 1 no QR code before the time limit (or SIGTERM), 2 error.
  *
  * Rear: SR541 (5 MP, has its own MCU), I2C 0x28, 16-bit registers, MIPI 2 lanes
@@ -119,8 +121,9 @@ static const struct cam FRONT = {"front", 1, 0x20, 0, 1, 192, 11, 0x0f, 0x22, 9}
 
 static int sfd = -1, vfd = -1;
 static uint32_t regbits;
-static volatile sig_atomic_t stop;
-static void on_signal(int sig) { (void)sig; stop = 1; }
+static volatile sig_atomic_t stop, focus;
+static void on_signal(int sig) { stop = 1; (void)sig; }
+static void on_focus(int sig) { focus = 1; (void)sig; }   /* SIGUSR1: focus again (rear) */
 static void fail(const char *m) { fprintf(stderr, "j1-camera: %s: %s\n", m, strerror(errno)); exit(2); }
 static void failx(const char *m) { fprintf(stderr, "j1-camera: %s\n", m); exit(2); }
 
@@ -160,6 +163,18 @@ static int send8(const struct table *t) {
 static int send16(const struct table *t) {
 	SENSOR_REG_TAB_T x = {t->t, t->n, 0x83, 0};
 	return ioctl(sfd, SENSOR_IO_I2C_WRITE_REGS, &x) < 0 ? -1 : 0;
+}
+
+/* rear lens range, like the HAL's _sr541_set_focus_mode: macro (QR codes at
+ * 10-30 cm) starts from the position stored at 0x062c */
+static void focus_macro(void) {
+	usleep(32000);
+	int v = rreg(0x062c); if (v < 0) return;
+	usleep(64000);
+	wreg(0x3824, 0x1400); wreg(0x3826, 0x0100);
+	wreg(0x3824, ((v << 4) & 0xff) | ((v >> 12) & 0xf) | (v & 0xf000) | 0x0a00); wreg(0x3826, 0x0200);
+	usleep(32000);
+	wreg(0x05b0, 0x8616); wreg(0x2c0a, 0x0008);
 }
 
 static void parm(int cap, int ext, uint32_t r2, uint32_t r3) {
@@ -263,6 +278,8 @@ int main(int argc, char **argv) {
 
 	struct sigaction sa; memset(&sa, 0, sizeof sa); sa.sa_handler = on_signal;   /* no SA_RESTART: a signal ends DQBUF */
 	sigaction(SIGTERM, &sa, 0); sigaction(SIGINT, &sa, 0); sigaction(SIGALRM, &sa, 0);
+	struct sigaction sf = sa; sf.sa_handler = on_focus; sf.sa_flags = SA_RESTART;
+	sigaction(SIGUSR1, &sf, 0);
 	alarm(seconds);
 
 	/* sensor power, I2C */
@@ -372,6 +389,11 @@ int main(int argc, char **argv) {
 			result = fclose(o) ? 2 : 0;
 			break;
 		}
+		/* rear: close-up range, then autofocus at the start and on SIGUSR1, like
+		 * the HAL's _sr541_AutoFocusDo; the lens moves while the frames go on
+		 * (reading its status every frame stops the stream) */
+		if (rear && frames == 3) focus_macro();
+		if (rear && (focus || frames == 5)) { focus = 0; wreg(0x05d4, 0x80); }
 		struct v4l2_buffer fr = b; fr.flags = DCAM_FREE_FRAME;
 		if (write(vfd, &fr, sizeof fr) < 0) { fprintf(stderr, "j1-camera: frame release: %s\n", strerror(errno)); result = 2; break; }
 	}
