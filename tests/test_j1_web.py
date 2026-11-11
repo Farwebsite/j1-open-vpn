@@ -363,9 +363,11 @@ class Tests(unittest.TestCase):
    self.assertIn('corriente media',app.bat_section())
    put(status='Charging',batt_read_raw_soc='900');fgu.write_text('370\n');now.return_value=1740
    self.assertEqual(app.bat_info()[4:6],[('Corriente de carga','370 mA','g'),('Llena en','unas 30 min','g')])
-   fgu.write_text('60\n');self.assertEqual(app.bat_info()[5],('Llena en','casi llena','g'))
+   def near_full():
+    info=app.bat_info();self.assertEqual(info[1],('Estado','cargando, casi llena','g'));self.assertNotIn('Llena en',[n for n,v,c in info])
+   fgu.write_text('60\n');near_full()
    # last stretch (constant voltage): the current falls, so no time from it
-   fgu.write_text('300\n');put(status='Charging',voltage_now='4370000');self.assertEqual(app.bat_info()[5],('Llena en','casi llena','g'))
+   fgu.write_text('300\n');put(status='Charging',voltage_now='4370000');near_full()
    fgu.unlink();put()
    # charger plugged: the discharge history no longer counts
    put(status='Charging');now.return_value=1780;app.bat_sample();self.assertEqual(len(app.BAT_HIST),1)

@@ -1171,7 +1171,9 @@ def bat_info():
             if mean<0:out.append(('Tiempo restante','unas '+duration(b['soc']/100*BAT_MAH/-mean),'y'))
         elif st=='Charging' and ma>0:
             out.append(('Corriente de carga','%d mA'%ma,'g'))
-            out.append(('Llena en','casi llena' if mean<100 or b['v']>=4.3 else 'unas '+duration((100-b['soc'])/100*BAT_MAH/mean),'g'))
+            # last, constant-voltage stretch: the current keeps falling, no time from it
+            if mean<100 or b['v']>=4.3:out[1]=('Estado','cargando, casi llena','g')
+            else:out.append(('Llena en','unas '+duration((100-b['soc'])/100*BAT_MAH/mean),'g'))
     elif st=='Discharging':
         r=bat_rate()
         if r and r<0:out+=[('Tiempo restante','unas '+duration(b['soc']/-r),'y'),('Consumo','aprox. %.1f W (%.1f %% por hora)'%(-r/100*BAT_WH,-r),'y')]
