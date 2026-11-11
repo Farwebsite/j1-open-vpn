@@ -29,7 +29,7 @@ class Tests(unittest.TestCase):
   s=app.page().decode();self.assertNotIn('SERVER_SECRET',s);self.assertNotIn('API_SECRET',s);self.assertIn('Buscar redes',s)
  def test_profile_contains_only_chosen_client(self):
   app.save('vpn.json',{'port':80,'endpoint':'vpn.example.com','private_key':'SERVER_SECRET','public_key':'serverpub','clients':[{'id':'a','ip':2,'private_key':'CLIENT_A','psk':'PSK_A'},{'id':'b','ip':3,'private_key':'CLIENT_B','psk':'PSK_B'}]})
-  s=app.client_profile('a','192.168.77.1');self.assertIn('CLIENT_A',s);self.assertNotIn('CLIENT_B',s);self.assertNotIn('SERVER_SECRET',s);self.assertIn('vpn.example.com:80',s)
+  s=app.client_profile('a','192.168.77.1');self.assertIn('CLIENT_A',s);self.assertNotIn('CLIENT_B',s);self.assertNotIn('SERVER_SECRET',s);self.assertIn('vpn.example.com:80',s);self.assertIn('MTU = 1420',s)
  def test_usb_boost_kernel_default_kept_and_choice_persisted(self):
   p=pathlib.Path(self.tmp.name)/'params';p.mkdir();(p/'j1_boost').write_text('1\n');(p/'j1_host_active').write_text('1\n');(p/'j1_boost_on').write_text('0\n')
   with patch.object(app,'USB_PARAMS',p):

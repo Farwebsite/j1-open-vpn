@@ -188,6 +188,9 @@ def firewall():
     Path('/proc/sys/net/ipv4/ip_forward').write_text('1\n')
     return bool(uplinks)
 
+# tunnel MTU: WireGuard's usual 1420 (IPv4 outside, 1500 links); fewer packets for
+# the same data, and every packet costs air time on the J1's Wi-Fi
+WG_MTU=1420
 def apply_vpn():
     with LOCK:
         v = ensure_vpn_state()
@@ -211,7 +214,7 @@ def apply_vpn():
         command(['wg','syncconf','wg0',str(RUN/'wg0.conf')])
         command(['ip','address','replace','10.66.0.1/24','dev','wg0'])
         command(['ip','-6','address','replace','fd66:6a31::1/64','dev','wg0'])
-        command(['ip','link','set','wg0','mtu','1280','up'])
+        command(['ip','link','set','wg0','mtu',str(WG_MTU),'up'])
         uplink=firewall()
         atomic(RUN/'vpn-summary', 'WG: UDP %s / %s clientes\n' % (v['port'],len(v['clients'])))
         RUNTIME['vpn']='Activo: UDP %s%s' % (v['port'], '' if uplink else ' (sin enlace a Internet)')
@@ -250,7 +253,7 @@ def client_profile(cid, fallback, endpoint=None):
 PrivateKey = {c['private_key']}
 Address = 10.66.0.{c['ip']}/32, fd66:6a31::{c['ip']:x}/128
 DNS = 1.1.1.1
-MTU = 1280
+MTU = {WG_MTU}
 
 [Peer]
 PublicKey = {v['public_key']}
