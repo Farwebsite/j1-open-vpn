@@ -333,4 +333,25 @@ class Tests(unittest.TestCase):
    # the front camera has no controls
    app.CAMQR.update(cam='front');self.assertNotIn(b'\nY\t',app.ui_request(b'a=nav%3Acamqr'))
    app.CAMQR.clear()
+ def test_web_ap_switch(self):
+  (app.RUN/'ap-name').write_text('AP: DIRECT-J1-VPN-TEST\n')
+  s=app.ap_section();self.assertIn('Activada: <b>DIRECT-J1-VPN-TEST</b>',s);self.assertIn('name=action value=ap><input type=hidden name=on value=0>',s)
+  app.ap_enable(False);s=app.ap_section();self.assertIn('Apagada.',s);self.assertIn('name=on value=1><button class=sec>Activar',s)
+  self.assertTrue((app.STATE/'ap-off').exists());app.ap_enable(True);self.assertFalse((app.STATE/'ap-off').exists())
+ def test_battery_estimate(self):
+  bat=app.STATE/'bat';bat.mkdir()
+  def put(**v):
+   for k,x in dict(dict(capacity='80',status='Discharging',voltage_now='3900000',temp='275',batt_read_raw_soc='800'),**v).items():(bat/k).write_text(x+'\n')
+  with patch.object(app,'BAT',bat),patch.object(app.time,'monotonic') as now:
+   app.BAT_HIST.clear();put();now.return_value=1000;app.bat_sample()
+   lines=app.bat_lines();self.assertEqual(lines[0],('Batería: 80% · 3.90 V · 27.5 °C','g'));self.assertIn('calculando',lines[1][0])
+   # 2 % in 12 min = 10 %/h: 78 % left lasts 7 h 48 min, 10 % of 7.03 Wh
+   put(batt_read_raw_soc='780',capacity='78');now.return_value=1720;app.bat_sample()
+   self.assertEqual([t for t,c in app.bat_lines()[1:]],['Sin cargador: quedan unas 7 h 48 min','Consumo aprox. 0.7 W (10.0 %/h)'])
+   # charger plugged: the discharge history no longer counts
+   put(status='Charging');now.return_value=1780;app.bat_sample();self.assertEqual(len(app.BAT_HIST),1)
+   self.assertEqual(app.bat_lines()[1],('Cargando','g'))
+   put(status='Full',capacity='100',batt_read_raw_soc='1000');self.assertEqual(app.bat_lines()[1][0],'Cargada, con el cargador puesto')
+   (bat/'capacity').unlink();self.assertEqual(app.bat_lines(),[])
+  app.BAT_HIST.clear()
 if __name__=='__main__':unittest.main(verbosity=2)

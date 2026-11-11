@@ -550,8 +550,12 @@ def pw_section():
         '<label>Nueva (8 a 64 caracteres)<input type=password name=pw autocomplete=new-password minlength=8 maxlength=64></label><label>Repítela<input type=password name=pw2 autocomplete=new-password></label>'
         '<button>Cambiar contraseña</button><small>Después el navegador volverá a pedirla. Si la olvidas, cámbiala desde la pantalla del J1 (Panel web).</small></form></section>')
 def ap_section():
-    own=panel_own_password() is not None
-    return ('<section id=red><h2>Clave de la red de configuración</h2><p class=muted>La red <b>'+esc(readrun('ap-name','AP').replace('AP: ',''))+'</b>. '+
+    own=panel_own_password() is not None;on=not (STATE/'ap-off').exists()
+    return ('<section id=red><h2>Red de configuración</h2><p>'+('Activada: <b>'+esc(readrun('ap-name','AP').replace('AP: ',''))+'</b>.' if on else 'Apagada.')+'</p><form method=post>'+hidden()+
+        '<input type=hidden name=action value=ap><input type=hidden name=on value='+('0' if on else '1')+'><button class=sec>'+('Apagar' if on else 'Activar')+' red de configuración</button>'+
+        ('<small>Si estás conectado a esta red perderás el panel: vuelve a activarla desde la pantalla del J1 o por el cable USB.'+(' La Wi-Fi cliente también está apagada: solo quedarán USB y la pantalla.' if (STATE/'wifi-off').exists() else '')+'</small>' if on else '')+'</form>'
+        '<h3>Clave</h3><p class=muted>'+
+
         ('El panel tiene contraseña propia: no cambia.' if own else 'Es también la contraseña de este panel: después el navegador te pedirá la nueva.')+
         ' Los equipos conectados a esa red se desconectarán y tendrán que volver a conectarse con la clave nueva.</p><form method=post>'+hidden()+
         '<input type=hidden name=action value=appass>'+'<label>Contraseña actual del panel<input type=password name=current autocomplete=current-password></label>'+
@@ -574,6 +578,7 @@ def home_html():
          ('<span class="bat'+(' low' if bat<=15 else '')+'">%d%%</span>'%bat if bat is not None else '')+'</header><div class=status>']
     for r in ui_home().rows:
         if r[0]=='L':out.append('<p'+(' class=m' if r[2] not in 'gyr' else '')+'>'+('<span class="dot '+r[2]+'"></span>' if r[2] in 'gyr' else '')+esc(r[1])+'</p>')
+    for t,c in bat_lines()[1:]:out.append('<p'+(' class=m' if c not in 'gyr' else '')+'>'+('<span class="dot '+c+'"></span>' if c in 'gyr' else '')+esc(t)+'</p>')
     pages=[SECTIONS[i:i+6] for i in range(0,len(SECTIONS),6)]
     out.append('</div><nav class=pages>'+''.join('<div class=page>'+''.join('<a class=t href="#'+sid+'">'+icon(ic,color)+'<span>'+esc(name)+'</span></a>' for sid,name,ic,color in pg)+'</div>' for pg in pages)+'</nav>')
     out.append('<div class=dots>'+''.join('<i'+(' class=on' if i==0 else '')+'></i>' for i in range(len(pages)))+'</div><p class=brand>'+esc(BRAND)+'<br>'+REPO+'</p>')
@@ -732,6 +737,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if f.get('pw','')!=f.get('pw2',''):raise ValueError('Las dos claves no coinciden')
                 ap_password(f.get('pw',''))
                 message='Clave de la red de configuración cambiada.'+('' if panel_own_password() else ' Es también la del panel: el navegador te la pedirá.')
+            elif action=='ap':
+                ap_enable(f.get('on')=='1');message='Red de configuración '+('activada.' if f.get('on')=='1' else 'apagada.')
             elif action=='lockunblock':pin_unblock();message='Pantalla desbloqueada: vuelve a aceptar el código.'
             elif action=='lockpinoff':pin_clear();message='Código de desbloqueo quitado.'
             elif action=='lock':display_save(lock=f.get('on')=='1');message='Pantalla de bloqueo '+('activada.' if display_lock() else 'desactivada.')
@@ -1105,6 +1112,51 @@ def net_bytes(dev):
     try:return sum(int((Path('/sys/class/net')/dev/'statistics'/k).read_text()) for k in ('rx_bytes','tx_bytes'))
     except OSError:return 0
 
+# ---- battery: the J1 does not measure current (current_now is always 1), so
+# the use and the time left come from how fast the charge (0.1 % steps) moves.
+# One reading a minute from the worker, the last hour, same charger state.
+BAT=Path('/sys/class/power_supply/battery')
+BAT_WH=1.85*3.8   # 1850 mAh, 3.8 V
+BAT_HIST=[]
+def bat_read():
+    rd=lambda n:(BAT/n).read_text().strip()
+    try:
+        b={'cap':int(rd('capacity')),'status':rd('status'),'v':int(rd('voltage_now'))/1e6,'temp':int(rd('temp'))/10}
+        try:b['soc']=int(rd('batt_read_raw_soc'))/10
+        except (OSError,ValueError):b['soc']=b['cap']
+        if not 0<=b['soc']<=100:b['soc']=b['cap']
+        return b
+    except (OSError,ValueError):return None
+def bat_sample():
+    b=bat_read();now=time.monotonic()
+    if not b:return
+    if BAT_HIST and BAT_HIST[-1][2]!=b['status']:BAT_HIST.clear()
+    BAT_HIST.append((now,b['soc'],b['status']))
+    while now-BAT_HIST[0][0]>3600:BAT_HIST.pop(0)
+def bat_rate():
+    # % per hour (+ charging, - discharging); None while it cannot be told yet
+    if len(BAT_HIST)<2:return None
+    (t0,s0,_),(t1,s1,_)=BAT_HIST[0],BAT_HIST[-1]
+    if t1-t0<600 or abs(s1-s0)<.5:return None
+    return (s1-s0)*3600/(t1-t0)
+def duration(h):
+    m=round(h*60)
+    return '%d min'%m if m<60 else '%d h %02d min'%(m//60,m%60)
+def bat_lines():
+    # [(text, colour)] for Recursos and the web panel's home
+    b=bat_read()
+    if not b:return []
+    out=[('Batería: %d%% · %.2f V · %.1f °C'%(b['cap'],b['v'],b['temp']),'r' if b['cap']<=15 else 'g')]
+    st=b['status'];r=bat_rate()
+    if st=='Discharging':
+        if r and r<0:out+=[('Sin cargador: quedan unas '+duration(b['soc']/-r),'y'),('Consumo aprox. %.1f W (%.1f %%/h)'%(-r/100*BAT_WH,-r),'m')]
+        elif len(BAT_HIST)>1 and BAT_HIST[-1][0]-BAT_HIST[0][0]>=3000:out.append(('Sin cargador: consumo muy bajo, más de 1 día','y'))
+        else:out.append(('Sin cargador: calculando lo que queda (unos 10 min)','y'))
+    elif st=='Charging':out.append(('Cargando'+(': llena en unas '+duration((100-b['soc'])/r) if r and r>0 else ''),'g'))
+    elif st=='Full':out.append(('Cargada, con el cargador puesto','g'))
+    else:out.append(('Cargador puesto, sin cargar','m'))
+    return out
+
 def ui_res(arg):
     s=Screen('res','Recursos',refresh=3)
     now=proc_sample();now['wg']=net_bytes('wg0');prev=RES_PREV.get('s');RES_PREV['s']=now
@@ -1124,8 +1176,8 @@ def ui_res(arg):
         mem={l.split(':')[0]:int(l.split()[1]) for l in Path('/proc/meminfo').read_text().splitlines() if l.split()[1:2]}
         s.label('RAM libre: %d de %d MB'%(mem.get('MemAvailable',mem['MemFree']+mem.get('Cached',0))//1024,mem['MemTotal']//1024))
         d=os.statvfs('/');s.label('Disco libre: %d MB'%(d.f_bavail*d.f_frsize//1048576))
-        s.label('Batería: %.1f °C'%(int(Path('/sys/class/power_supply/battery/temp').read_text())/10),'m')
     except (OSError,KeyError,ValueError):pass
+    for t,c in bat_lines():s.label(t,c)
     return s.small('% de CPU sobre el total de los 2 núcleos (el segundo solo se enciende con carga). Esta vista solo mide mientras está abierta.','m')
 
 BRAND='J1 Open VPN · © 2026 Farweb'
@@ -1615,8 +1667,9 @@ def has_uplink():
     except (RuntimeError,OSError,subprocess.SubprocessError):return False
 
 def worker():
-    next_dns=0;next_vpn=0;next_upnp=0
+    next_dns=0;next_vpn=0;next_upnp=0;next_bat=0
     while True:
+        if time.monotonic()>=next_bat:bat_sample();next_bat=time.monotonic()+60
         if (time.monotonic()>=next_upnp or (RUN/'upnp-request').exists()) and has_uplink():
             (RUN/'upnp-request').unlink(missing_ok=True)
             try:upnp_sync();next_upnp=time.monotonic()+1800
