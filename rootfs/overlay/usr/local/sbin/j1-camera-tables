@@ -3,14 +3,22 @@
 camera HAL (system partition, mounted read-only) into /var/lib/j1/camera.tables
 for j1-camera. Samsung's tables are not part of J1 Open VPN: every J1 has them.
 
-File: 4 tables (front init, front 640x480, rear init, rear 2592x1944), each a
-little-endian u32 count and count pairs of u16 (register, value)."""
+File: 24 tables (front init, front 640x480, rear init, rear 2592x1944, then
+the rear settings below in that order), each a little-endian u32 count and
+count pairs of u16 (register, value)."""
 import os, struct, subprocess, sys, tempfile
 from pathlib import Path
 
 OUT = Path('/var/lib/j1/camera.tables')
 HAL = 'lib/hw/camera.sc8830.so'
 SENSORS = (('g_sr200pc20_yuv_info', (640, 480)), ('g_sr541_mipi_yuv_info', (2592, 1944)))   # front, rear
+# rear settings the HAL keeps in a list by name, for the camera screen's
+# controls: metering, brightness 0-8, contrast 0-4, sharpness 0-2
+REAR_SETTINGS = (['regs_sr541_metering_' + m for m in ('matrix', 'centerweighted', 'spot')] +
+                 ['regs_sr541_brightness_level_%d' % i for i in range(9)] +
+                 ['regs_sr541_contrast_level_%d' % i for i in range(5)] +
+                 ['regs_sr541_sharpness_level_%d' % i for i in range(3)])
+NTABLES = 2 * len(SENSORS) + len(REAR_SETTINGS)
 
 def partition(name):
     for d in Path('/sys/class/block').glob('mmcblk0p*'):
@@ -45,6 +53,10 @@ class Elf:
             name, value = struct.unpack_from('<II', d, o)
             end = d.index(b'\0', strtab[4] + name)
             s.syms[d[strtab[4] + name:end].decode('ascii', 'replace')] = value
+    def va(s, off):
+        for v, o, n in s.load:
+            if o <= off < o + n:return off - o + v
+        raise ValueError('offset 0x%x not loaded' % off)
     def off(s, va):
         for v, o, n in s.load:
             if v <= va < v + n:return va - v + o
@@ -64,10 +76,31 @@ def tables(elf, sym, size):
         if len(out) == 2:return out
     raise ValueError('%s: no %dx%d table' % ((sym,) + size))
 
+def setting(elf, name):
+    """a table from the HAL's settings list, {regs, count, name} x 12 bytes,
+    found through its name"""
+    s = elf.d.find(name.encode() + b'\0')
+    if s < 0:raise ValueError(name + ': not in the HAL')
+    ref = struct.pack('<I', elf.va(s))
+    for o in range(0, len(elf.d) - 3, 4):
+        if elf.d[o:o + 4] == ref and o >= 8:
+            regs, n = struct.unpack_from('<II', elf.d, o - 8)
+            if 0 < n <= 8192:return elf.d[elf.off(regs):elf.off(regs) + 4 * n]
+    raise ValueError(name + ': no table')
+
+def complete():
+    """the file is there with all its tables (an older one had fewer)"""
+    try:d = OUT.read_bytes()
+    except OSError:return False
+    o = n = 0
+    while o + 4 <= len(d):o += 4 + 4 * struct.unpack_from('<I', d, o)[0];n += 1
+    return o == len(d) and n == NTABLES
+
 def main():
-    if OUT.exists() and '-f' not in sys.argv[1:]:return
+    if complete() and '-f' not in sys.argv[1:]:return
     elf = Elf(read_hal())
-    data = b''.join(struct.pack('<I', len(t) // 4) + t for sym, size in SENSORS for t in tables(elf, sym, size))
+    found = [t for sym, size in SENSORS for t in tables(elf, sym, size)] + [setting(elf, n) for n in REAR_SETTINGS]
+    data = b''.join(struct.pack('<I', len(t) // 4) + t for t in found)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUT.with_suffix('.tmp')
     tmp.write_bytes(data);os.replace(tmp, OUT)

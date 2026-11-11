@@ -486,6 +486,104 @@ static void cam_back_pos(int *x, int *y) { *x = 16; *y = 16; }
 static void cam_switch_pos(int *x, int *y) { *x = SW - CAM_BTN - 28; *y = SH - CAM_BTN - 36; }
 static int in_btn(int x, int y, int bx, int by) { return x >= bx - 16 && x < bx + CAM_BTN + 16 && y >= by - 16 && y < by + CAM_BTN + 16; }
 static double focus_at; static int focus_x, focus_y;
+/* camera controls (Y row, "b=a4 m=s c=2 s=1 f=m"): brightness slider on the
+ * right with A (automatic) above it, and a settings panel opened from the
+ * bottom left button. pressed: -4 settings, -5 A, -6 slider, -10 - row * 8 -
+ * chip a panel choice */
+static int cam_panel, cam_drag = -1;
+static const char *cam_set(char k) {   /* value of k in the Y row, or 0 */
+	for (int i = 0; i < nel; i++) if (els[i].t == 'Y' && els[i].b)
+		for (const char *p = els[i].b; *p; p++) if ((p == els[i].b || p[-1] == ' ') && p[0] == k && p[1] == '=') return p + 2;
+	return 0;
+}
+static void cam_set_pos(int *x, int *y) { *x = 28; *y = SH - CAM_BTN - 36; }
+#define SL_X (SW - 52)   /* slider centre line; level 8 at the top */
+#define SL_Y0 210
+#define SL_Y1 570
+#define SL_KNOB 48
+static int sl_y(int level) { return SL_Y1 - level * (SL_Y1 - SL_Y0) / 8; }
+static int sl_level(int y) { int l = (SL_Y1 - y + (SL_Y1 - SL_Y0) / 16) * 8 / (SL_Y1 - SL_Y0); return l < 0 ? 0 : l > 8 ? 8 : l; }
+#define AUTO_Y 132   /* A button centre */
+static const struct { const char *label; char key; const char *vals, *names; } CAM_ROWS[] = {
+	{"Medici\xa2n", 'm', "mcs", "Matriz|Centro|Puntual"},
+	{"Contraste", 'c', "01234", "-2|-1|0|+1|+2"},
+	{"Nitidez", 's', "012", "Baja|Normal|Alta"},
+	{"Enfoque", 'f', "nm", "Normal|Macro"},
+};
+#define CAM_NROWS 4
+#define PANEL_ROW 62
+static void panel_box(int *x, int *y, int *w, int *h) {
+	*x = 16; *w = SW - 32; *h = CAM_NROWS * PANEL_ROW + 24;
+	int bx, by; cam_set_pos(&bx, &by); *y = by - 20 - *h;
+}
+static void chip_box(int row, int i, int *x, int *y, int *w, int *h) {
+	int px, py, pw, ph; panel_box(&px, &py, &pw, &ph);
+	int n = (int)strlen(CAM_ROWS[row].vals), x0 = px + 14 + 124, x1 = px + pw - 14;
+	*w = (x1 - x0 - (n - 1) * 8) / n; *h = 44;
+	*x = x0 + i * (*w + 8); *y = py + 12 + row * PANEL_ROW + (PANEL_ROW - *h) / 2;
+}
+static void chip_name(int row, int i, char *out, int size) {
+	const char *p = CAM_ROWS[row].names;
+	for (int k = 0; k < i && p; k++) { p = strchr(p, '|'); if (p) p++; }
+	int n = 0; while (p && p[n] && p[n] != '|') n++;
+	snprintf(out, size, "%.*s", n, p ? p : "");
+}
+/* what is under the finger on the camera screen (pressed codes) */
+static int cam_hit(int x, int y) {
+	const struct el *e = &els[cam_el()]; int bx, by, ctl = cam_set('b') != 0;
+	cam_back_pos(&bx, &by); if (in_btn(x, y, bx, by)) return -2;
+	cam_switch_pos(&bx, &by); if (e->b && *e->b && in_btn(x, y, bx, by)) return -3;
+	if (!ctl) return -1;
+	cam_set_pos(&bx, &by); if (in_btn(x, y, bx, by)) return -4;
+	if (cam_panel) {
+		int px, py, pw, ph; panel_box(&px, &py, &pw, &ph);
+		for (int r = 0; r < CAM_NROWS; r++) for (int i = 0; i < (int)strlen(CAM_ROWS[r].vals); i++) {
+			int cx, cy, cw, chh; chip_box(r, i, &cx, &cy, &cw, &chh);
+			if (x >= cx - 4 && x < cx + cw + 4 && y >= cy - 8 && y < cy + chh + 8) return -10 - r * 8 - i;
+		}
+		return y >= py && y < py + ph ? -7 : -1;   /* -7: on the panel, nothing */
+	}
+	if (abs(x - SL_X) < 40 && abs(y - AUTO_Y) < 40) return -5;
+	if (abs(x - SL_X) < 48 && y > SL_Y0 - 40 && y < SL_Y1 + 40) return -6;
+	return -1;
+}
+static void render_controls(void) {
+	const char *b = cam_set('b'); if (!b) return;
+	int bx, by; cam_set_pos(&bx, &by);
+	rrect(bx, by, CAM_BTN, CAM_BTN, CAM_BTN / 2, pressed == -4 || cam_panel ? C_DOWN : color(28, 28, 30));
+	icon_sz(bx + (CAM_BTN - 30) / 2, by + (CAM_BTN - 30) / 2, icon_id("camtune"), 0, cam_panel ? C_YEL : C_WHITE);
+	if (cam_panel) {
+		int px, py, pw, ph; panel_box(&px, &py, &pw, &ph);
+		rrect(px, py, pw, ph, 24, color(28, 28, 30));
+		for (int r = 0; r < CAM_NROWS; r++) {
+			const char *v = cam_set(CAM_ROWS[r].key);
+			int cx, cy, cw, chh; chip_box(r, 0, &cx, &cy, &cw, &chh);
+			text(px + 18, cy + (chh - LINE(1)) / 2, CAM_ROWS[r].label, 1, C_MUT);
+			for (int i = 0; i < (int)strlen(CAM_ROWS[r].vals); i++) {
+				char name[16]; chip_name(r, i, name, sizeof name); chip_box(r, i, &cx, &cy, &cw, &chh);
+				int on = v && *v == CAM_ROWS[r].vals[i];
+				rrect(cx, cy, cw, chh, chh / 2, pressed == -10 - r * 8 - i ? C_DOWN : on ? C_ACC : color(58, 58, 60));
+				text_mid(cx + cw / 2, cy + (chh - LINE(1)) / 2, name, 1, C_WHITE);
+			}
+		}
+		return;
+	}
+	/* A (automatic) and the brightness slider */
+	int autom = *b == 'a', level = cam_drag >= 0 ? cam_drag : (autom ? b[1] : b[0]) - '0';
+	if (level < 0 || level > 8) level = 4;
+	rrect(SL_X - 26, AUTO_Y - 26, 52, 52, 26, autom ? C_YEL : pressed == -5 ? C_DOWN : color(28, 28, 30));
+	text_mid(SL_X, AUTO_Y - LINE(2) / 2, "A", 2, autom ? C_BLACK : C_WHITE);
+	rrect(SL_X - 3, SL_Y0, 6, SL_Y1 - SL_Y0, 3, color(200, 200, 205));
+	for (int l = 0; l <= 8; l++) fill(SL_X - 9, sl_y(l) - 1, 18, 2, color(200, 200, 205));
+	int ky = sl_y(level) - SL_KNOB / 2;
+	rrect(SL_X - SL_KNOB / 2, ky, SL_KNOB, SL_KNOB, SL_KNOB / 2, autom && cam_drag < 0 ? C_YEL : C_WHITE);
+	icon_sz(SL_X - 15, ky + (SL_KNOB - 30) / 2, icon_id("disp"), 0, C_BLACK);
+	if (cam_drag >= 0) {   /* the level, next to the knob, while the finger is on it */
+		char t[4]; snprintf(t, sizeof t, "%d", level);
+		rrect(SL_X - SL_KNOB / 2 - 64, ky + 4, 48, 40, 20, color(28, 28, 30));
+		text_mid(SL_X - SL_KNOB / 2 - 40, ky + 4 + (40 - LINE(2)) / 2, t, 2, C_WHITE);
+	}
+}
 static void render_camera(const struct el *e) {
 	buf = backbuf; clip0 = 0; clip1 = SH;
 	const char *hint = e->c ? e->c : "", *kind = e->d ? e->d : "n";
@@ -518,6 +616,7 @@ static void render_camera(const struct el *e) {
 		rrect(bx, by, CAM_BTN, CAM_BTN, CAM_BTN / 2, pressed == -3 ? C_DOWN : color(28, 28, 30));
 		icon_sz(bx + (CAM_BTN - 30) / 2, by + (CAM_BTN - 30) / 2, icon_id("camswitch"), 0, C_WHITE);
 	}
+	render_controls();
 	/* where the finger asked to focus, for a second */
 	if (focus_at && now() - focus_at < 1.0) {
 		int s = 96, x = focus_x - s / 2, y = focus_y - s / 2; uint32_t c = C_YEL;
@@ -529,6 +628,7 @@ static void render_camera(const struct el *e) {
 static void render(void) {
 	if (locked) { render_lock(); return; }
 	int ce = cam_el(); if (ce >= 0) { render_camera(&els[ce]); return; }
+	cam_panel = 0; cam_drag = -1;   /* the camera next time starts with the panel shut */
 	buf = backbuf; clip0 = 0; clip1 = SH; fill(0, 0, SW, SH, C_BG);
 	clip0 = TOP; clip1 = TOP + view_h();
 	int w = SW - 2 * PAD;
@@ -876,9 +976,8 @@ static void touch_down(int x, int y) {
 	if (locked) { lock_drag = y > lock_y() - 30 && y < lock_y() + LK_H + 30 && x < PAD + 4 + LK_K + 40; lock_x = 0; return; }
 	if (kb_open && y >= KBY - PVH) { kb_down = kb_hit(x, y); pressed = t_el = -1; }
 	else if (cam_el() >= 0) {
-		int bx, by; const struct el *e = &els[cam_el()]; pressed = t_el = -1;
-		cam_back_pos(&bx, &by); if (in_btn(x, y, bx, by)) pressed = -2;
-		cam_switch_pos(&bx, &by); if (e->b && *e->b && in_btn(x, y, bx, by)) pressed = -3;
+		t_el = -1; pressed = cam_hit(x, y);
+		if (pressed == -6) cam_drag = sl_level(y);
 	}
 	else pressed = t_el = hit(x, y);
 	if (sliding()) { pressed = -1; last_drag_render = 0; slide(x); return; }
@@ -895,6 +994,10 @@ static void touch_move(int x, int y) {
 	}
 	if (kb_open && t_y0 >= KBY - PVH) return;
 	if (sliding()) { slide(x); return; }
+	if (cam_el() >= 0) {   /* the brightness slider follows the finger; the rest waits for the release */
+		if (pressed == -6 && sl_level(y) != cam_drag) { cam_drag = sl_level(y); render(); }
+		return;
+	}
 	/* sideways on the tiles: change page */
 	int ty = t_y0 - TOP + scroll, on_tiles = npages > 1 && !kb_open && ty >= tiles_y && ty < tiles_y + tiles_h + DOTS_H;
 	if (!dragging && !hdrag && on_tiles && abs(x - t_x0) > 24 && abs(x - t_x0) > abs(y - t_y0)) { hdrag = 1; pressed = -1; }
@@ -943,11 +1046,19 @@ static void touch_up(int x, int y) {
 	}
 	int tap = t_maxd < TAP_MOVE && dur < TAP_TIME;
 	int ce = cam_el();
-	if (ce >= 0) {   /* camera: back, switch, or a tap on the picture (focus / start again) */
+	if (ce >= 0) {   /* camera: back, switch, controls, or a tap on the picture (focus / start again) */
 		int was = pressed; pressed = -1;
-		if (!tap) { render(); return; }
-		if (was == -2) { send_action(back, 0); return; }
-		if (was == -3) { char a[64]; snprintf(a, sizeof a, "%s", els[ce].b); send_action(a, 0); return; }
+		if (was == -6) { char a[32]; snprintf(a, sizeof a, "camqr.set:b=%d", cam_drag); cam_drag = -1; send_action(a, 0); return; }
+		if (!tap || was == -7) { render(); return; }
+		if (was == -2) { cam_panel = 0; send_action(back, 0); return; }
+		if (was == -3) { char a[64]; snprintf(a, sizeof a, "%s", els[ce].b); cam_panel = 0; send_action(a, 0); return; }
+		if (was == -4) { cam_panel = !cam_panel; render(); return; }
+		if (was == -5) { send_action("camqr.set:b=a", 0); return; }
+		if (was <= -10) {
+			int r = (-10 - was) / 8, i = (-10 - was) % 8; char a[32];
+			snprintf(a, sizeof a, "camqr.set:%c=%c", CAM_ROWS[r].key, CAM_ROWS[r].vals[i]); send_action(a, 0); return;
+		}
+		if (cam_panel) { cam_panel = 0; render(); return; }   /* a tap outside the panel closes it */
 		if (els[ce].a[0] && strcmp(els[ce].a, "-")) {
 			char a[64]; snprintf(a, sizeof a, "%s", els[ce].a);
 			if (!strncmp(a, "camqr.focus", 11)) { focus_at = now(); focus_x = x; focus_y = y; }

@@ -9,6 +9,14 @@
  *
  * SIGUSR1 focuses the rear camera again (tap on the picture).
  *
+ * Rear camera settings come from CONTROL, read again whenever it changes, one
+ * line "b=a m=s c=2 s=1 f=m": brightness a (automatic) or 0-8, metering m/c/s
+ * (matrix, centre, spot), contrast 0-4, sharpness 0-2, focus n/m (normal,
+ * macro). Missing: spot metering, automatic brightness, macro. With automatic
+ * brightness the level goes down while the middle of the picture is burnt
+ * (a code on a bright screen) and back up when it is dark; the level in use is
+ * written to LEVEL.
+ *
  * Exit status: 0 done, 1 no QR code before the time limit (or SIGTERM), 2 error.
  *
  * Rear: SR541 (5 MP, has its own MCU), I2C 0x28, 16-bit registers, MIPI 2 lanes
@@ -64,6 +72,8 @@ const char *zbar_symbol_get_data(const zbar_symbol_t *);
 
 #define TABLES "/var/lib/j1/camera.tables"
 #define PREVIEW "/run/j1-camera.preview"
+#define CONTROL "/run/j1-camera.ctl"
+#define LEVEL "/run/j1-camera.level"
 #define PW 240
 #define PH 320
 
@@ -107,8 +117,11 @@ static int W, H;               /* frames kept */
 
 struct reg { uint16_t r, v; };
 struct table { uint32_t n; struct reg *t; };
-/* TABLES: front init, front 640x480, rear init, rear 2592x1944 */
-static struct table tab[4];
+/* TABLES: front init, front 640x480, rear init, rear 2592x1944, then the rear
+ * settings: metering matrix, centre, spot; brightness 0-8; contrast 0-4;
+ * sharpness 0-2 */
+enum { T_METER = 4, T_BRIGHT = T_METER + 3, T_CONTRAST = T_BRIGHT + 9, T_SHARP = T_CONTRAST + 5, NTAB = T_SHARP + 3 };
+static struct table tab[NTAB];
 
 struct cam {
 	const char *name;
@@ -139,7 +152,7 @@ static int rreg(int r) { SENSOR_REG_BITS_T x = {(uint16_t)r, 0, regbits}; return
 static void load_tables(void) {
 	FILE *f = fopen(TABLES, "rb");
 	if (!f) fail("no sensor tables (" TABLES ", made by j1-camera-tables)");
-	for (int i = 0; i < 4; i++) {
+	for (int i = 0; i < NTAB; i++) {
 		if (fread(&tab[i].n, 4, 1, f) != 1 || tab[i].n == 0 || tab[i].n > 8192) failx("bad sensor tables");
 		tab[i].t = malloc(tab[i].n * sizeof *tab[i].t);
 		if (!tab[i].t || fread(tab[i].t, sizeof *tab[i].t, tab[i].n, f) != tab[i].n) failx("bad sensor tables");
@@ -167,16 +180,67 @@ static int send16(const struct table *t) {
 	return ioctl(sfd, SENSOR_IO_I2C_WRITE_REGS, &x) < 0 ? -1 : 0;
 }
 
-/* rear lens range, like the HAL's _sr541_set_focus_mode: macro (QR codes at
- * 10-30 cm) starts from the position stored at 0x062c */
-static void focus_macro(void) {
+/* rear lens range, like the HAL's _sr541_set_focus_mode: normal starts from
+ * the position stored at 0x062a, macro (QR codes at 10-30 cm) from 0x062c */
+static void focus_mode(int macro) {
 	usleep(32000);
-	int v = rreg(0x062c); if (v < 0) return;
+	int v = rreg(macro ? 0x062c : 0x062a); if (v < 0) return;
 	usleep(64000);
 	wreg(0x3824, 0x1400); wreg(0x3826, 0x0100);
 	wreg(0x3824, ((v << 4) & 0xff) | ((v >> 12) & 0xf) | (v & 0xf000) | 0x0a00); wreg(0x3826, 0x0200);
 	usleep(32000);
-	wreg(0x05b0, 0x8616); wreg(0x2c0a, 0x0008);
+	if (macro) { wreg(0x05b0, 0x8616); wreg(0x2c0a, 0x0008); }
+	else wreg(0x05b0, 0x9e16);
+}
+
+/* rear settings (CONTROL); -1 = not set yet */
+struct settings { int bright /* -1 automatic */, meter, contrast, sharp, macro; };
+static struct settings asked = {-1, 2, 2, 1, 1}, now_set = {-2, -1, -1, -1, -1};
+static int level = 4;   /* brightness in use, the HAL's default */
+static struct timespec ctl_time;
+static void read_control(void) {
+	struct stat st;
+	if (stat(CONTROL, &st) < 0 || (st.st_mtim.tv_sec == ctl_time.tv_sec && st.st_mtim.tv_nsec == ctl_time.tv_nsec)) return;
+	ctl_time = st.st_mtim;
+	char line[128] = "";
+	FILE *f = fopen(CONTROL, "r"); if (!f) return;
+	if (!fgets(line, sizeof line, f)) line[0] = 0;
+	fclose(f);
+	for (char *p = strtok(line, " \n"); p; p = strtok(0, " \n")) {
+		if (strlen(p) != 3 || p[1] != '=') continue;
+		char k = p[0], v = p[2]; int n = v - '0';
+		if (k == 'b') asked.bright = v == 'a' ? -1 : n >= 0 && n <= 8 ? n : asked.bright;
+		else if (k == 'm') asked.meter = v == 'm' ? 0 : v == 'c' ? 1 : v == 's' ? 2 : asked.meter;
+		else if (k == 'c' && n >= 0 && n <= 4) asked.contrast = n;
+		else if (k == 's' && n >= 0 && n <= 2) asked.sharp = n;
+		else if (k == 'f' && (v == 'n' || v == 'm')) asked.macro = v == 'm';
+	}
+}
+static void tell_level(void) {
+	FILE *f = fopen(LEVEL ".tmp", "w"); if (!f) return;
+	fprintf(f, "%d\n", level);
+	if (fclose(f) == 0) rename(LEVEL ".tmp", LEVEL);
+}
+static void set_level(int l) { level = l; send16(&tab[T_BRIGHT + l]); tell_level(); }
+/* what changed in CONTROL goes to the sensor */
+static void apply_settings(void) {
+	read_control();
+	if (asked.meter != now_set.meter) send16(&tab[T_METER + asked.meter]);
+	if (asked.contrast != now_set.contrast) send16(&tab[T_CONTRAST + asked.contrast]);
+	if (asked.sharp != now_set.sharp) send16(&tab[T_SHARP + asked.sharp]);
+	if (asked.bright >= 0 && asked.bright != now_set.bright) set_level(asked.bright);
+	if (asked.bright < 0 && now_set.bright != -1) tell_level();
+	if (asked.macro != now_set.macro) { focus_mode(asked.macro); focus = now_set.macro >= 0; }   /* the first time: focus at frame 5 */
+	now_set = asked;
+}
+/* automatic brightness, from the middle of the picture (where the code is):
+ * burnt (a bright screen) -> down; dark -> up, not past the HAL's default */
+static void auto_level(const uint8_t *y) {
+	unsigned n = 0, burnt = 0, sum = 0;
+	for (int r = H / 4; r < H * 3 / 4; r += 8) for (int c = W / 4; c < W * 3 / 4; c += 8) { uint8_t v = y[r * W + c]; n++; sum += v; burnt += v >= 248; }
+	if (!n) return;
+	if (burnt * 10 > n && level > 0) set_level(level - 1);
+	else if (burnt * 100 < n && sum / n < 90 && level < 4) set_level(level + 1);
 }
 
 static void parm(int cap, int ext, uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3) {
@@ -231,13 +295,14 @@ static void preview(const uint8_t *y, const uint8_t *uv, int rear) {
 		const uint8_t *q = uv + (sy / 2) * W + (sx / 2) * 2;
 		l[i] = y[sy * W + sx]; cv[i] = (int16_t)(q[0] - 128); cu[i] = (int16_t)(q[1] - 128);
 	}
-	/* dim rooms: stretch the brightness between the 2% darkest and brightest points
-	 * (only the picture on the screen; the QR reader gets the frame as it is) */
+	/* front, dim rooms: stretch the brightness between the 2% darkest and brightest
+	 * points (only the picture on the screen; the QR reader gets the frame as it
+	 * is). The rear one has its brightness control: the picture shows it as it is */
 	unsigned hist[256] = {0}, lo = 0, hi = 255, n = 0;
 	for (int i = 0; i < PW * PH; i++) hist[l[i]]++;
 	while (lo < 255 && (n += hist[lo]) < PW * PH / 50) lo++;
 	for (n = 0; hi > 0 && (n += hist[hi]) < PW * PH / 50; ) hi--;
-	int stretch = hi > lo + 8 && (lo > 0 || hi < 255);
+	int stretch = !rear && hi > lo + 8 && (lo > 0 || hi < 255);
 	for (int i = 0; i < PW * PH; i++) {
 		int Y = l[i];
 		if (stretch) Y = Y <= (int)lo ? 0 : Y >= (int)hi ? 255 : (Y - (int)lo) * 255 / (int)(hi - lo);
@@ -411,16 +476,19 @@ int main(int argc, char **argv) {
 			result = fclose(o) ? 2 : 0;
 			break;
 		}
-		/* rear: close-up range, then autofocus at the start and on SIGUSR1, like
-		 * the HAL's _sr541_AutoFocusDo; the lens moves while the frames go on
-		 * (reading its status every frame stops the stream) */
-		if (rear && frames == 3) focus_macro();
+		/* rear: settings and lens range from frame 3 on, then autofocus at the
+		 * start, on SIGUSR1 and on a new range, like the HAL's _sr541_AutoFocusDo;
+		 * the lens moves while the frames go on (reading its status every frame
+		 * stops the stream). Automatic brightness looks every 4 frames, time for
+		 * the sensor to follow the last change */
+		if (rear && frames >= 3) apply_settings();
+		if (rear && qr && asked.bright < 0 && frames >= 8 && frames % 4 == 0) auto_level(y);
 		if (rear && (focus || frames == 5)) { focus = 0; wreg(0x05d4, 0x80); }
 		struct v4l2_buffer fr = b; fr.flags = DCAM_FREE_FRAME;
 		if (write(vfd, &fr, sizeof fr) < 0) { fprintf(stderr, "j1-camera: frame release: %s\n", strerror(errno)); result = 2; break; }
 	}
 	alarm(0);
-	unlink(PREVIEW);
+	unlink(PREVIEW); unlink(LEVEL);
 
 	/* everything off again, PHY powered down as at boot */
 	ioctl(vfd, VIDIOC_STREAMOFF, &t);

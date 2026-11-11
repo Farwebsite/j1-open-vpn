@@ -317,4 +317,20 @@ class Tests(unittest.TestCase):
    app.CAMQR.update(running=True,gen=4);app.camqr_run('rear',4)
   self.assertIn(b'no es de una red Wi-Fi',app.ui_request(b'a=nav%3Acamqr'))
   self.assertIn(b'\te\n',app.ui_request(b'a=camqr.start%3Aside&s=camqr'))
+ def test_camera_settings(self):
+  ctl=str(app.STATE/'cam.ctl');level=str(app.STATE/'cam.level')
+  with patch.object(app,'CAM_CTL',ctl),patch.object(app,'CAM_LEVEL',level),patch.dict(app.CAM_SET,{'b':'a','m':'s','c':'2','s':'1','f':'m'}):
+   app.CAMQR.clear();app.CAMQR.update(running=True,cam='rear',gen=1,proc=None)
+   # automatic: the screen shows the level j1-camera is using
+   pathlib.Path(level).write_text('2\n')
+   out=app.ui_request(b'a=nav%3Acamqr');self.assertIn(b'\nY\tcamqr.set\tb=a2 m=s c=2 s=1 f=m',out)
+   # each control goes to j1-camera's control file
+   app.ui_request(b'a=camqr.set%3Ab%3D6');app.ui_request(b'a=camqr.set%3Am%3Dc');out=app.ui_request(b'a=camqr.set%3Af%3Dn')
+   self.assertEqual(pathlib.Path(ctl).read_text(),'b=6 m=c c=2 s=1 f=n\n');self.assertIn(b'Y\tcamqr.set\tb=6 m=c c=2 s=1 f=n',out)
+   for bad in (b'b%3D9',b'c%3D5',b'x%3D1',b'm%3D',b's%3D11'):
+    self.assertIn(b'\te\n',app.ui_request(b'a=camqr.set%3A'+bad+b'&s=camqr'))
+   self.assertEqual(pathlib.Path(ctl).read_text(),'b=6 m=c c=2 s=1 f=n\n')
+   # the front camera has no controls
+   app.CAMQR.update(cam='front');self.assertNotIn(b'\nY\t',app.ui_request(b'a=nav%3Acamqr'))
+   app.CAMQR.clear()
 if __name__=='__main__':unittest.main(verbosity=2)

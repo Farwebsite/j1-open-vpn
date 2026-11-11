@@ -753,7 +753,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 #  T id title back | R seconds | M text kind(o/e) | L text color | l small-text color
 #  B action text style(n/p/d/i) | S action text 0/1 | F name label value kind(t/p/n/i)
 #  Q row,row,... (QR, 1 = dark) | G (gap) | C action text icon (home tile, two per row)
-#  W camera (live picture from /run/j1-camera.preview, painted by the screen itself)
+#  X tap-action switch-action hint color (full screen camera: live picture from
+#    /run/j1-camera.preview, painted by the screen itself) | Y action settings
+#    (camera controls: brightness, metering, contrast, sharpness, focus; the
+#    screen sends action:key=value)
 #  P name column column color (table row, small print) | D action value min max (slider) | O idle-seconds | V brightness | K lock-screen 0/1
 LOGS = Path('/root/j1-logs')
 def cp437(s):
@@ -873,6 +876,30 @@ def qr_wifi_parse(text):
     if kind=='NOPASS' or (not kind and not pw):pw=''
     elif not 8<=len(pw.encode())<=63:raise ValueError('La contraseña del código no es válida (8 a 63 caracteres)')
     return {'ssid':ssid,'password':pw}
+# rear camera settings, kept while web.py runs; j1-camera reads CAM_CTL whenever
+# it changes: b brightness (a automatic, 0-8), m metering (m matrix, c centre,
+# s spot), c contrast 0-4, s sharpness 0-2, f focus (n normal, m macro)
+CAM_CTL='/run/j1-camera.ctl';CAM_LEVEL='/run/j1-camera.level'
+CAM_OPTS={'b':'a012345678','m':'mcs','c':'01234','s':'012','f':'nm'}
+CAM_SET={'b':'a','m':'s','c':'2','s':'1','f':'m'}
+def camqr_control():
+    with LOCK:line=' '.join('%s=%s'%(k,CAM_SET[k]) for k in CAM_OPTS)
+    try:
+        with open(CAM_CTL+'.tmp','w') as f:f.write(line+'\n')
+        os.replace(CAM_CTL+'.tmp',CAM_CTL)
+    except OSError:pass
+def camqr_set(arg):
+    k,_,v=arg.partition('=')
+    if k not in CAM_OPTS or len(v)!=1 or v not in CAM_OPTS[k]:raise ValueError('Ajuste de cámara no válido')
+    with LOCK:CAM_SET[k]=v
+    camqr_control()
+def camqr_settings():
+    """Y row: b (a + level in use when automatic), then the rest"""
+    try:level=open(CAM_LEVEL).read().strip()[:1]
+    except OSError:level=''
+    with LOCK:st=dict(CAM_SET)
+    if st['b']=='a':st['b']='a'+(level if level.isdigit() else '4')
+    return ' '.join('%s=%s'%(k,st[k]) for k in CAM_OPTS)
 CAM_DEVICE=threading.Lock()   # one j1-camera at a time: they share the sensors
 def camqr_run(cam,gen):
     """one scan; gen tells this run from a newer one (camera switched or started again)"""
@@ -884,6 +911,7 @@ def camqr_run(cam,gen):
     with CAM_DEVICE:
         with LOCK:
             if CAMQR.get('gen')!=gen or CAMQR.get('cancel'):return
+            if cam=='rear':camqr_control()
             try:p=subprocess.Popen(['/usr/local/bin/j1-camera','qr',cam,str(CAMQR_SECONDS)],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
             except OSError:p=None
             CAMQR['proc']=p
@@ -920,7 +948,8 @@ def camqr_stop():
     if p:p.terminate()
 
 def ui_camqr(arg):
-    """full screen camera (X row: tap action, switch action, hint, hint color)"""
+    """full screen camera (X row: tap action, switch action, hint, hint color;
+    Y row, rear camera running: settings action, settings as camqr_settings)"""
     with LOCK:
         q=dict(CAMQR)
         if q.get('joined'):CAMQR.clear();CAMQR['gen']=q['gen']   # shown once
@@ -929,7 +958,8 @@ def ui_camqr(arg):
     s=Screen('camqr','Escanear QR','camqr.close',refresh=1 if q.get('running') else 0)
     if q.get('running'):
         hint='Apunta al código QR de la red Wi-Fi' if cam=='rear' else 'Pon el código QR delante de la pantalla'
-        return s.add('X','camqr.focus' if cam=='rear' else '-','camqr.switch',hint,'n')
+        s.add('X','camqr.focus' if cam=='rear' else '-','camqr.switch',hint,'n')
+        return s.add('Y','camqr.set',camqr_settings()) if cam=='rear' else s
     return s.add('X','camqr.start:'+cam,'camqr.switch',(q.get('error') or 'Cámara apagada')+'. Toca para volver a intentarlo','y')
 
 # Time zone: POSIX TZ strings (no tzdata needed). Stored in /etc/j1/tz, read by
@@ -1410,6 +1440,7 @@ def ui_action(a, f):
     if verb=='camqr.start':camqr_start(arg);return 'camqr',None
     if verb=='camqr.switch':camqr_switch();return 'camqr',None
     if verb=='camqr.focus':camqr_focus();return 'camqr',None
+    if verb=='camqr.set':camqr_set(arg);return 'camqr',None
     if verb=='camqr.close':camqr_stop();return 'wifi',None
     if verb in ('ap.on','ap.off'):ap_enable(verb=='ap.on');return 'ap','Red de configuración '+('activada' if verb=='ap.on' else 'apagada')
     if verb=='ap.pass':ap_password(f.get('password',''));return 'ap','Clave cambiada. Úsala también en la web.'
