@@ -3,14 +3,14 @@
 camera HAL (system partition, mounted read-only) into /var/lib/j1/camera.tables
 for j1-camera. Samsung's tables are not part of J1 Open VPN: every J1 has them.
 
-File: 4 tables (front init, front 640x480, rear init, rear 640x480), each a
+File: 4 tables (front init, front 640x480, rear init, rear 2592x1944), each a
 little-endian u32 count and count pairs of u16 (register, value)."""
 import os, struct, subprocess, sys, tempfile
 from pathlib import Path
 
 OUT = Path('/var/lib/j1/camera.tables')
 HAL = 'lib/hw/camera.sc8830.so'
-SENSORS = ('g_sr200pc20_yuv_info', 'g_sr541_mipi_yuv_info')   # front, rear
+SENSORS = (('g_sr200pc20_yuv_info', (640, 480)), ('g_sr541_mipi_yuv_info', (2592, 1944)))   # front, rear
 
 def partition(name):
     for d in Path('/sys/class/block').glob('mmcblk0p*'):
@@ -51,23 +51,23 @@ class Elf:
         raise ValueError('address 0x%x outside the file' % va)
     def u32(s, va):return struct.unpack_from('<I', s.d, s.off(va))[0]
 
-def tables(elf, sym):
-    """init table and the 640x480 one, from the sensor's SENSOR_INFO_T"""
+def tables(elf, sym, size):
+    """init table and the one for size, from the sensor's SENSOR_INFO_T"""
     res = elf.u32(elf.syms[sym] + 60)   # resolution_tab_info_ptr: {regs, count, width, height, ...} x 24 bytes
     out = []
     for i in range(10):
         regs, n, wh = elf.u32(res + 24 * i), elf.u32(res + 24 * i + 4), elf.u32(res + 24 * i + 8)
         if not regs:break
-        if i == 0 or (wh & 0xffff, wh >> 16) == (640, 480):
+        if i == 0 or (wh & 0xffff, wh >> 16) == size:
             if not 0 < n <= 8192:raise ValueError('bad table size')
             out.append(elf.d[elf.off(regs):elf.off(regs) + 4 * n])
         if len(out) == 2:return out
-    raise ValueError(sym + ': no 640x480 table')
+    raise ValueError('%s: no %dx%d table' % ((sym,) + size))
 
 def main():
     if OUT.exists() and '-f' not in sys.argv[1:]:return
     elf = Elf(read_hal())
-    data = b''.join(struct.pack('<I', len(t) // 4) + t for sym in SENSORS for t in tables(elf, sym))
+    data = b''.join(struct.pack('<I', len(t) // 4) + t for sym, size in SENSORS for t in tables(elf, sym, size))
     OUT.parent.mkdir(parents=True, exist_ok=True)
     tmp = OUT.with_suffix('.tmp')
     tmp.write_bytes(data);os.replace(tmp, OUT)

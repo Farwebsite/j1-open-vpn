@@ -1,7 +1,7 @@
 /* j1-camera: the J1's cameras without Android.
  *
  *   j1-camera qr    rear|front [seconds]   prints the first QR code seen
- *   j1-camera photo rear|front file.pgm    saves one 640x480 grey picture
+ *   j1-camera photo rear|front file.pgm    saves one grey picture
  *
  * While looking for a QR code, every frame also goes to PREVIEW for the screen:
  * 240x320 RGB, upright (the sensors are mounted at 90 and 270 degrees) and,
@@ -12,8 +12,10 @@
  * Exit status: 0 done, 1 no QR code before the time limit (or SIGTERM), 2 error.
  *
  * Rear: SR541 (5 MP, has its own MCU), I2C 0x28, 16-bit registers, MIPI 2 lanes
- * on D-PHY A. Front: SR200PC20 (2 MP), I2C 0x20, 8-bit registers, MIPI 1 lane on
- * D-PHY B. The sensors' register tables are Samsung's: j1-camera-tables copies
+ * on D-PHY A. It runs at its full 2592x1944 and only the middle 1280x960 is
+ * kept: a QR code on another phone's screen needs that detail, and 640x480
+ * frames of the whole view do not have it. Front: SR200PC20 (2 MP), I2C 0x20,
+ * 8-bit registers, MIPI 1 lane on D-PHY B, 640x480. The sensors' register tables are Samsung's: j1-camera-tables copies
  * them out of the phone's own Android camera HAL into TABLES.
  *
  * The Samsung kernel (built for SCX35) does not set up the camera PHYs the way
@@ -100,13 +102,12 @@ struct ion_phys_data { int fd_buffer; unsigned long phys; size_t size; };
 enum { CAPTURE_MODE = 0x1000, CAPTURE_SKIP_NUM, CAPTURE_SENSOR_SIZE, CAPTURE_SENSOR_TRIM, CAPTURE_FRM_ID_BASE, CAPTURE_SET_CROP };
 #define DCAM_PATH1 1
 #define DCAM_FREE_FRAME 0xA55A   /* write() flag: give a frame back while streaming */
-#define W 640
-#define H 480
-#define NBUF 4
+#define ION_HEAP (4 << 20)   /* the carve-out frames come from (device tree) */
+static int W, H;               /* frames kept */
 
 struct reg { uint16_t r, v; };
 struct table { uint32_t n; struct reg *t; };
-/* TABLES: front init, front 640x480, rear init, rear 640x480 */
+/* TABLES: front init, front 640x480, rear init, rear 2592x1944 */
 static struct table tab[4];
 
 struct cam {
@@ -115,9 +116,10 @@ struct cam {
 	uint32_t lanes, bps;
 	unsigned pd_bit; uint32_t phy_sel;
 	uint8_t hsfreq, settle;
+	int sw, sh, w, h;   /* sensor picture, middle part kept */
 };
-static const struct cam REAR  = {"rear", 0, 0x28, 3, 2, 672, 10, 0x0c, 0x18, 24};
-static const struct cam FRONT = {"front", 1, 0x20, 0, 1, 192, 11, 0x0f, 0x22, 9};
+static const struct cam REAR  = {"rear", 0, 0x28, 3, 2, 672, 10, 0x0c, 0x18, 24, 2592, 1944, 1280, 960};
+static const struct cam FRONT = {"front", 1, 0x20, 0, 1, 192, 11, 0x0f, 0x22, 9, 640, 480, 640, 480};
 
 static int sfd = -1, vfd = -1;
 static uint32_t regbits;
@@ -177,11 +179,12 @@ static void focus_macro(void) {
 	wreg(0x05b0, 0x8616); wreg(0x2c0a, 0x0008);
 }
 
-static void parm(int cap, int ext, uint32_t r2, uint32_t r3) {
+static void parm(int cap, int ext, uint32_t r0, uint32_t r1, uint32_t r2, uint32_t r3) {
 	struct v4l2_streamparm p; memset(&p, 0, sizeof p);
 	p.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
 	p.parm.capture.capability = cap; p.parm.capture.extendedmode = ext;
 	p.parm.capture.capturemode = 1;   /* continuous */
+	p.parm.capture.reserved[0] = r0; p.parm.capture.reserved[1] = r1;
 	p.parm.capture.reserved[2] = r2; p.parm.capture.reserved[3] = r3;
 	if (ioctl(vfd, VIDIOC_S_PARM, &p) < 0) fail("dcam parameters");
 }
@@ -215,15 +218,16 @@ static void copy_words(const volatile uint32_t *p, uint8_t *to, int n) { for (in
 static void luma(const volatile uint32_t *p, uint8_t *y) { copy_words(p, y, W * H); }
 
 static uint8_t clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)v; }
-/* half size, turned to portrait, RGB; written whole then renamed so the screen
+/* PW x PH (a half or a quarter of the frame), turned to portrait, RGB; written whole then renamed so the screen
  * never reads half a frame. uv: NV21 colour plane, V,U pairs for 2x2 pixels */
 static void preview(const uint8_t *y, const uint8_t *uv, int rear) {
 	static uint8_t l[PW * PH], o[PW * PH * 3];
 	static int16_t cu[PW * PH], cv[PW * PH];
+	int k = W / PH;
 	for (int r = 0; r < PH; r++) for (int c = 0; c < PW; c++) {
 		/* rear, turned 90 degrees clockwise: screen row = sensor column, screen column =
 		 * sensor rows bottom up. Front, turned 270 and mirrored: columns right to left */
-		int sx = rear ? r * 2 : W - 2 - r * 2, sy = H - 2 - c * 2, i = r * PW + c;
+		int sx = rear ? r * k : W - k - r * k, sy = H - k - c * k, i = r * PW + c;
 		const uint8_t *q = uv + (sy / 2) * W + (sx / 2) * 2;
 		l[i] = y[sy * W + sx]; cv[i] = (int16_t)(q[0] - 128); cu[i] = (int16_t)(q[1] - 128);
 	}
@@ -249,11 +253,11 @@ static void preview(const uint8_t *y, const uint8_t *uv, int rear) {
 	if (ok) rename(PREVIEW ".tmp", PREVIEW);
 }
 
-static int find_qr(zbar_image_scanner_t *sc, uint8_t *y) {
+static int scan(zbar_image_scanner_t *sc, const uint8_t *y, int w, int h) {
 	zbar_image_t *im = zbar_image_create();
 	zbar_image_set_format(im, Y800);
-	zbar_image_set_size(im, W, H);
-	zbar_image_set_data(im, y, W * H, 0);
+	zbar_image_set_size(im, w, h);
+	zbar_image_set_data(im, y, (unsigned long)w * h, 0);
 	int found = 0;
 	if (zbar_scan_image(sc, im) > 0) {
 		const zbar_symbol_t *s = zbar_image_first_symbol(im);
@@ -261,6 +265,21 @@ static int find_qr(zbar_image_scanner_t *sc, uint8_t *y) {
 	}
 	zbar_image_destroy(im);
 	return found;
+}
+/* zbar takes 0.7 s over a whole 1280x960 frame and 0.16 s over 640x480, so
+ * big frames are read by turns: all of it at half size (each pixel the mean of
+ * four, which also helps with a code held close or the other screen's pixels),
+ * then the middle quarter as it is (a small code) */
+static int find_qr(zbar_image_scanner_t *sc, const uint8_t *y, int turn) {
+	static uint8_t *part;
+	if (W <= 640) return scan(sc, y, W, H);
+	if (!part && !(part = malloc(W * H / 4))) return 0;
+	for (int r = 0; r < H / 2; r++) {
+		if (turn & 1) { memcpy(part + r * (W / 2), y + (H / 4 + r) * W + W / 4, W / 2); continue; }
+		const uint8_t *a = y + 2 * r * W, *b = a + W;
+		for (int c = 0; c < W / 2; c++) part[r * (W / 2) + c] = (uint8_t)((a[2 * c] + a[2 * c + 1] + b[2 * c] + b[2 * c + 1] + 2) >> 2);
+	}
+	return scan(sc, part, W / 2, H / 2);
 }
 
 int main(int argc, char **argv) {
@@ -271,6 +290,7 @@ int main(int argc, char **argv) {
 	}
 	int qr = !strcmp(argv[1], "qr");
 	const struct cam *c = strcmp(argv[2], "rear") ? &FRONT : &REAR;
+	W = c->w; H = c->h;
 	int rear = c == &REAR, seconds = qr ? (argc > 3 ? atoi(argv[3]) : 60) : 30;
 	if (seconds < 1 || seconds > 600) seconds = 60;
 	regbits = c->regbits;
@@ -314,7 +334,9 @@ int main(int argc, char **argv) {
 
 	/* frame memory with a physical address */
 	int ion = open("/dev/ion", O_RDWR); if (ion < 0) fail("/dev/ion");
-	size_t frame = (W * H * 3 / 2 + 4095) / 4096 * 4096, total = frame * NBUF;
+	size_t frame = (W * H * 3 / 2 + 4095) / 4096 * 4096;
+	int nbuf = ION_HEAP / frame > 4 ? 4 : ION_HEAP / frame;   /* rear: 2 */
+	size_t total = frame * nbuf;
 	struct ion_allocation_data al = {total, 4096, ION_HEAP_OVERLAY, 0, 0};
 	if (ioctl(ion, ION_IOC_ALLOC, &al) < 0) fail("ion alloc");
 	struct ion_fd_data sh = {al.handle, -1};
@@ -330,17 +352,17 @@ int main(int argc, char **argv) {
 	tp[0] = 0; /* YUV */ tp[1] = 2; /* UYVY */ tp[5] = 8; tp[7] = c->lanes; tp[14] = 0; /* IF_OPEN */ tp[15] = 1; /* CSI2 */
 	struct v4l2_control ctl = {0, (int32_t)(uintptr_t)tp};
 	if (ioctl(vfd, VIDIOC_S_CTRL, &ctl) < 0) fail("dcam timing");
-	parm(CAPTURE_MODE, 0, 0, 0);
-	parm(CAPTURE_SKIP_NUM, 0, 0, 0);
-	parm(CAPTURE_SENSOR_SIZE, 0, W, H);
-	parm(CAPTURE_SENSOR_TRIM, 0, W, H);
-	parm(CAPTURE_FRM_ID_BASE, 1, 0, 0);
-	parm(CAPTURE_SET_CROP, 1, W, H);
+	parm(CAPTURE_MODE, 0, 0, 0, 0, 0);
+	parm(CAPTURE_SKIP_NUM, 0, 0, 0, 0, 0);
+	parm(CAPTURE_SENSOR_SIZE, 0, 0, 0, c->sw, c->sh);
+	parm(CAPTURE_SENSOR_TRIM, 0, (c->sw - W) / 2, (c->sh - H) / 2, W, H);   /* the middle */
+	parm(CAPTURE_FRM_ID_BASE, 1, 0, 0, 0, 0);
+	parm(CAPTURE_SET_CROP, 1, 0, 0, W, H);
 	struct v4l2_format f; memset(&f, 0, sizeof f);
 	f.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; f.fmt.pix.width = W; f.fmt.pix.height = H;
 	f.fmt.pix.pixelformat = V4L2_PIX_FMT_NV21; f.fmt.pix.colorspace = DCAM_PATH1;
 	if (ioctl(vfd, VIDIOC_S_FMT, &f) < 0) fail("dcam format");
-	for (int i = 0; i < NBUF; i++) {
+	for (int i = 0; i < nbuf; i++) {
 		struct v4l2_buffer b; memset(&b, 0, sizeof b);
 		b.type = V4L2_BUF_TYPE_VIDEO_CAPTURE; b.flags = DCAM_PATH1; b.index = i;
 		b.m.userptr = ph.phys + i * frame; b.length = ph.phys + i * frame + W * H;   /* y, uv */
@@ -378,9 +400,9 @@ int main(int argc, char **argv) {
 			if (!stop) { fprintf(stderr, "j1-camera: no picture from the %s camera\n", c->name); result = 2; }
 			break;
 		}
-		const volatile uint32_t *p = (const volatile uint32_t *)(mem + (b.index % NBUF) * frame);
+		const volatile uint32_t *p = (const volatile uint32_t *)(mem + (b.index % nbuf) * frame);
 		frames++;
-		if (qr) { luma(p, y); copy_words(p + W * H / 4, uv, W * H / 2); preview(y, uv, rear); if (frames > 2 && find_qr(sc, y)) { result = 0; break; } }
+		if (qr) { luma(p, y); copy_words(p + W * H / 4, uv, W * H / 2); preview(y, uv, rear); if (frames > 2 && find_qr(sc, y, frames)) { result = 0; break; } }
 		if (!qr && frames == want) {
 			luma(p, y);
 			FILE *o = fopen(argv[3], "wb");
