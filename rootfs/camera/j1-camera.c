@@ -20,9 +20,9 @@
  * Exit status: 0 done, 1 no QR code before the time limit (or SIGTERM), 2 error.
  *
  * Rear: SR541 (5 MP, has its own MCU), I2C 0x28, 16-bit registers, MIPI 2 lanes
- * on D-PHY A. It runs at its full 2592x1944 and only the middle 1280x960 is
- * kept: a QR code on another phone's screen needs that detail, and 640x480
- * frames of the whole view do not have it. Front: SR200PC20 (2 MP), I2C 0x20,
+ * on D-PHY A, 1280x720: a QR code on another phone's screen needs more than
+ * 640x480. Not the full 2592x1944 mode: that one is Samsung's snapshot, with
+ * exposure, focus and settings frozen. Front: SR200PC20 (2 MP), I2C 0x20,
  * 8-bit registers, MIPI 1 lane on D-PHY B, 640x480. The sensors' register tables are Samsung's: j1-camera-tables copies
  * them out of the phone's own Android camera HAL into TABLES.
  *
@@ -74,8 +74,8 @@ const char *zbar_symbol_get_data(const zbar_symbol_t *);
 #define PREVIEW "/run/j1-camera.preview"
 #define CONTROL "/run/j1-camera.ctl"
 #define LEVEL "/run/j1-camera.level"
-#define PW 240
-#define PH 320
+#define PW 360
+#define PH 480
 
 /* ---- sensor driver (/dev/sprd_sensor) ---- */
 typedef struct { uint16_t reg_addr, reg_value; uint32_t reg_bits; } SENSOR_REG_BITS_T;
@@ -117,7 +117,7 @@ static int W, H;               /* frames kept */
 
 struct reg { uint16_t r, v; };
 struct table { uint32_t n; struct reg *t; };
-/* TABLES: front init, front 640x480, rear init, rear 2592x1944, then the rear
+/* TABLES: front init, front 640x480, rear init, rear 1280x720, then the rear
  * settings: metering matrix, centre, spot; brightness 0-8; contrast 0-4;
  * sharpness 0-2 */
 enum { T_METER = 4, T_BRIGHT = T_METER + 3, T_CONTRAST = T_BRIGHT + 9, T_SHARP = T_CONTRAST + 5, NTAB = T_SHARP + 3 };
@@ -131,7 +131,7 @@ struct cam {
 	uint8_t hsfreq, settle;
 	int sw, sh, w, h;   /* sensor picture, middle part kept */
 };
-static const struct cam REAR  = {"rear", 0, 0x28, 3, 2, 672, 10, 0x0c, 0x18, 24, 2592, 1944, 1280, 960};
+static const struct cam REAR  = {"rear", 0, 0x28, 3, 2, 672, 10, 0x0c, 0x18, 24, 1280, 720, 1280, 720};
 static const struct cam FRONT = {"front", 1, 0x20, 0, 1, 192, 11, 0x0f, 0x22, 9, 640, 480, 640, 480};
 
 static int sfd = -1, vfd = -1;
@@ -282,16 +282,16 @@ static void copy_words(const volatile uint32_t *p, uint8_t *to, int n) { for (in
 static void luma(const volatile uint32_t *p, uint8_t *y) { copy_words(p, y, W * H); }
 
 static uint8_t clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (uint8_t)v; }
-/* PW x PH (a half or a quarter of the frame), turned to portrait, RGB; written whole then renamed so the screen
+/* PW x PH, turned to portrait, RGB (the middle 3:4 of a wider frame); written whole then renamed so the screen
  * never reads half a frame. uv: NV21 colour plane, V,U pairs for 2x2 pixels */
 static void preview(const uint8_t *y, const uint8_t *uv, int rear) {
 	static uint8_t l[PW * PH], o[PW * PH * 3];
 	static int16_t cu[PW * PH], cv[PW * PH];
-	int k = W / PH;
+	int rw = H * PH / PW, x0 = (W - rw) / 2;   /* sensor columns shown */
 	for (int r = 0; r < PH; r++) for (int c = 0; c < PW; c++) {
 		/* rear, turned 90 degrees clockwise: screen row = sensor column, screen column =
 		 * sensor rows bottom up. Front, turned 270 and mirrored: columns right to left */
-		int sx = rear ? r * k : W - k - r * k, sy = H - k - c * k, i = r * PW + c;
+		int sx = x0 + (rear ? r * rw / PH : rw - 1 - r * rw / PH), sy = H - 1 - c * H / PW, i = r * PW + c;
 		const uint8_t *q = uv + (sy / 2) * W + (sx / 2) * 2;
 		l[i] = y[sy * W + sx]; cv[i] = (int16_t)(q[0] - 128); cu[i] = (int16_t)(q[1] - 128);
 	}
@@ -331,7 +331,7 @@ static int scan(zbar_image_scanner_t *sc, const uint8_t *y, int w, int h) {
 	zbar_image_destroy(im);
 	return found;
 }
-/* zbar takes 0.7 s over a whole 1280x960 frame and 0.16 s over 640x480, so
+/* zbar takes 0.5 s over a whole 1280x720 frame and 0.12 s over 640x360, so
  * big frames are read by turns: all of it at half size (each pixel the mean of
  * four, which also helps with a code held close or the other screen's pixels),
  * then the middle quarter as it is (a small code) */

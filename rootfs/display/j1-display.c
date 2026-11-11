@@ -205,13 +205,13 @@ static int qr_dims(const char *q, int *cols, int *rows) {
 	int m = (SW - 2 * PAD) / (*cols + 8); return m > 8 ? 8 : m < 1 ? 1 : m;
 }
 /* camera screen (X): the picture fills the screen, with back, switch camera
- * and a hint drawn over it. j1-camera writes each frame to PV_FILE, 240x320
+ * and a hint drawn over it. j1-camera writes each frame to PV_FILE, 360x480
  * RGB, already upright; the screen paints it about 8 times a second without
  * asking web.py. X fields: tap action (- none), switch action, hint, hint
  * color (n: the camera is starting) */
 #define PV_FILE "/run/j1-camera.preview"
-#define PV_W 240
-#define PV_H 320
+#define PV_W 360
+#define PV_H 480
 static uint8_t pv[PV_W * PV_H * 3];
 static int pv_ok;
 static struct timespec pv_time;
@@ -587,7 +587,7 @@ static void render_controls(void) {
 static void render_camera(const struct el *e) {
 	buf = backbuf; clip0 = 0; clip1 = SH;
 	const char *hint = e->c ? e->c : "", *kind = e->d ? e->d : "n";
-	/* the picture, cropped at the sides to fill the screen (600x800 from 240x320) */
+	/* the picture, cropped at the sides to fill the screen (600x800 from 360x480) */
 	int fw = SH * PV_W / PV_H, cx = (fw - SW) / 2;
 	if (pv_ok) {
 		static uint32_t row[PV_W];

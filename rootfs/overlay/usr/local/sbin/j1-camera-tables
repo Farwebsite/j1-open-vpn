@@ -3,7 +3,7 @@
 camera HAL (system partition, mounted read-only) into /var/lib/j1/camera.tables
 for j1-camera. Samsung's tables are not part of J1 Open VPN: every J1 has them.
 
-File: 24 tables (front init, front 640x480, rear init, rear 2592x1944, then
+File: 24 tables (front init, front 640x480, rear init, rear 1280x720, then
 the rear settings below in that order), each a little-endian u32 count and
 count pairs of u16 (register, value)."""
 import os, struct, subprocess, sys, tempfile
@@ -11,7 +11,7 @@ from pathlib import Path
 
 OUT = Path('/var/lib/j1/camera.tables')
 HAL = 'lib/hw/camera.sc8830.so'
-SENSORS = (('g_sr200pc20_yuv_info', (640, 480)), ('g_sr541_mipi_yuv_info', (2592, 1944)))   # front, rear
+SENSORS = (('g_sr200pc20_yuv_info', (640, 480)), ('g_sr541_mipi_yuv_info', (1280, 720)))   # front, rear
 # rear settings the HAL keeps in a list by name, for the camera screen's
 # controls: metering, brightness 0-8, contrast 0-4, sharpness 0-2
 REAR_SETTINGS = (['regs_sr541_metering_' + m for m in ('matrix', 'centerweighted', 'spot')] +
