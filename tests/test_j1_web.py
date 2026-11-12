@@ -558,15 +558,15 @@ class Tests(unittest.TestCase):
  def test_ssh_network_rules(self):
   import ipaddress
   nets=[ipaddress.ip_interface('192.168.1.40/24'),ipaddress.ip_interface('192.168.1.41/24'),ipaddress.ip_interface('192.168.1.40/32')]
-  self.assertEqual(app.ssh_conf(),{'lan':False,'vpn':False})
+  self.assertEqual(app.ssh_conf(),{'enabled':True,'lan':False,'vpn':False})
   r=app.ssh_rules(app.ssh_conf(),nets);self.assertEqual(r[1],['-i','rndis0','-j','ACCEPT']);self.assertEqual(r[-1],['-j','DROP']);self.assertEqual(len(r),3)
   with patch.object(app,'apply_vpn'):
    out=app.ui_request(b'a=ssh.lan%3A1&s=panel').decode('cp437')
-  self.assertIn('SSH desde la red local activado',out);self.assertIn('S\tssh.lan:0\tSSH desde la red local\t1',out)
+  self.assertIn('SSH desde la red local activado',out);self.assertIn('S\tssh.lan:0\tDesde la red local\t1',out)
   r=app.ssh_rules(app.ssh_conf(),nets)
   self.assertIn(['!','-i','wg0','-s','192.168.1.0/24','-j','ACCEPT'],r);self.assertEqual(len(r),4)   # one rule per network
   with patch.object(app,'apply_vpn'):app.ui_request(b'a=ssh.vpn%3A1&s=panel');app.ui_request(b'a=ssh.lan%3A0&s=panel')
-  self.assertEqual(app.ssh_conf(),{'lan':False,'vpn':True});self.assertIn(['-i','wg0','-s','10.66.0.0/24','-j','ACCEPT'],app.ssh_rules(app.ssh_conf(),nets))
+  self.assertEqual(app.ssh_conf(),{'enabled':True,'lan':False,'vpn':True});self.assertIn(['-i','wg0','-s','10.66.0.0/24','-j','ACCEPT'],app.ssh_rules(app.ssh_conf(),nets))
   self.assertIn(b'\te\n',app.ui_request(b'a=ssh.lan%3A5&s=panel'))
   # firewall(): one NAT rule for any link but the tunnel, SSH chain rebuilt
   calls=[]
@@ -645,4 +645,16 @@ class Tests(unittest.TestCase):
    app.firewall();n=len(calls);self.assertGreater(n,5)
    app.firewall();self.assertEqual(len(calls),n)   # same rules: nothing run
    app.APPLIED['fw_at']-=app.REAPPLY+1;app.firewall();self.assertEqual(len(calls),2*n)   # written again after 5 min
+ def test_ssh_screen_master_switch(self):
+  self.assertIn('Acceso SSH',app.ui_request(b'a=nav:sys&s=sys').decode('cp437'))
+  with patch.object(app,'lan_ips',return_value=['192.168.1.40']),patch.object(app,'apply_vpn'):
+   out=app.ui_request(b'a=ssh.lan%3A1&s=ssh').decode('cp437')
+   self.assertIn('T	ssh	Acceso SSH',out);self.assertIn('Red local: root@192.168.1.40',out);self.assertIn('Ninguna clave autorizada',out)
+   out=app.ui_request(b'a=ssh.on%3A0&s=ssh').decode('cp437')
+  self.assertIn('SSH desactivado',out);self.assertNotIn('ssh.lan',out);self.assertIn('S	ssh.on:1	SSH	0',out)
+  self.assertEqual(app.ssh_rules(app.ssh_conf(),[]),[['-m','conntrack','--ctstate','ESTABLISHED,RELATED','-j','ACCEPT'],['-j','DROP']])
+  self.assertTrue(app.ssh_conf()['lan'])   # kept for when it is switched on again
+  self.vpn0();self.assertIn('Ahora desactivado',app.ssh_section())
+  with patch.object(app,'apply_vpn'):app.ui_request(b'a=ssh.on%3A1&s=ssh')
+  self.assertIn(['-i','rndis0','-j','ACCEPT'],app.ssh_rules(app.ssh_conf(),[]))
 if __name__=='__main__':unittest.main(verbosity=2)

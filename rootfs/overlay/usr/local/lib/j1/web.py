@@ -541,9 +541,13 @@ def usb_section():
 # way back in.
 def ssh_conf():
     c=load('ssh.json',{})
-    return {'lan':c.get('lan') is True,'vpn':c.get('vpn') is True}
+    return {'enabled':c.get('enabled') is not False,'lan':c.get('lan') is True,'vpn':c.get('vpn') is True}
 def ssh_rules(c, nets):
-    r=[['-m','conntrack','--ctstate','ESTABLISHED,RELATED','-j','ACCEPT'],['-i','rndis0','-j','ACCEPT']]
+    r=[['-m','conntrack','--ctstate','ESTABLISHED,RELATED','-j','ACCEPT']]
+    # switched off: no new connection from anywhere, USB included (the open
+    # session goes on); the screen of the J1 switches it on again
+    if not c['enabled']:return r+[['-j','DROP']]
+    r.append(['-i','rndis0','-j','ACCEPT'])
     if c['vpn']:r.append(['-i','wg0','-s',str(VPN_NET),'-j','ACCEPT'])
     if c['lan']:
         # a fixed IP shows up as /32 too: only the J1 itself, so left out
@@ -557,7 +561,7 @@ def ssh_firewall(call,rules):
     for r in rules:call('-A','J1_SSH',*r)
 def ssh_set(**kw):
     raw=load('ssh.json',{});raw.update({k:bool(v) for k,v in kw.items()});save('ssh.json',raw);c=ssh_conf()
-    log('SSH: USB'+''.join(' + '+n for n,k in (('red local','lan'),('VPN','vpn')) if c[k]))
+    log('SSH: '+('USB'+''.join(' + '+n for n,k in (('red local','lan'),('VPN','vpn')) if c[k]) if c['enabled'] else 'desactivado'))
     try:apply_vpn()
     except Exception:raise RuntimeError('Guardado, pero no se pudo aplicar el cortafuegos')
 SSH_KEY_RE=re.compile(r'(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( [ -~]{0,100})?')
@@ -636,8 +640,9 @@ def ssh_section():
     c=ssh_conf();ips=lan_ips()
     where=''.join('<br><code>ssh -i clave root@'+esc(ip)+'</code> (red local)' for ip in ips) if c['lan'] else ''
     return pw_section()+ap_section()+lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo con clave (sin contraseña) y nunca desde Internet. Por USB siempre: <code>ssh -i clave root@192.168.77.1</code>'+where+
-        ('<br><code>ssh -i clave root@10.66.0.1</code> (VPN)' if c['vpn'] else '')+'</p>'
+        ('<br><code>ssh -i clave root@10.66.0.1</code> (VPN)' if c['vpn'] else '')+('<br><b>Ahora desactivado.</b>' if not c['enabled'] else '')+'</p>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshnet>'
+        '<label><input type=checkbox name=enabled value=1'+(' checked' if c['enabled'] else '')+'> SSH activado</label><small>Desactivado no acepta conexiones nuevas por ningún lado, tampoco por USB; se vuelve a activar aquí o en la pantalla del J1 (Sistema → Acceso SSH).</small>'
         '<label><input type=checkbox name=lan value=1'+(' checked' if c['lan'] else '')+'> También desde la red local (Wi-Fi o cable de casa)</label>'
         '<label><input type=checkbox name=vpn value=1'+(' checked' if c['vpn'] else '')+'> También desde la VPN</label>'
         '<small>Con el J1 lejos, la red local es la vía de entrada si la VPN falla, desde otro equipo de esa red. No abras el puerto 22 en el router.</small><br><button>Guardar acceso SSH</button></form>'
@@ -896,7 +901,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 watch_save(vpn=f.get('vpn')=='1',net=f.get('net')=='1',reboot=f.get('reboot')=='1',min=int(m) if m.isdigit() else -1,
                            sched=int(sc) if sc.isdigit() else -1,hour=int(h) if h.isdigit() else -1)
                 message='Vigilantes guardados.'
-            elif action=='sshnet':ssh_set(lan=f.get('lan')=='1',vpn=f.get('vpn')=='1');message='Acceso SSH guardado.'
+            elif action=='sshnet':ssh_set(enabled=f.get('enabled')=='1',lan=f.get('lan')=='1',vpn=f.get('vpn')=='1');message='Acceso SSH guardado.'
             elif action=='notify':
                 notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'],token=f.get('token',''),topic=f.get('topic'))
                 message='Avisos guardados.'
@@ -1526,11 +1531,7 @@ def ui_panel(arg):
     s.gap().label('Contraseña del panel (usuario admin):').small('Propia' if own else 'La misma clave de la red de configuración','g' if own else 'm')
     s.field('pw','Nueva contraseña (8 a 64 caracteres)','','p').field('pw2','Repítela','','p').button('panel.pw','Cambiar contraseña del panel','p')
     if own:s.button('panel.pwreset','Volver a usar la clave de la red','i')
-    sc=ssh_conf();keys=len(ssh_keys())
-    s.gap().label('SSH (solo con clave; por USB siempre):')
-    s.toggle('ssh.lan:0' if sc['lan'] else 'ssh.lan:1','SSH desde la red local',sc['lan'])
-    s.toggle('ssh.vpn:0' if sc['vpn'] else 'ssh.vpn:1','SSH desde la VPN',sc['vpn'])
-    if not keys:s.small('Ninguna clave autorizada: añádela en el panel web (Acceso SSH).','y')
+    s.gap().button('nav:ssh','Acceso SSH','i','lock')
     s.gap().label('IP del J1 en la red local:')
     return s.button('nav:ip:wlan0','IP de la Wi-Fi (DHCP o fija)','i','ip').button('nav:ip:eth','IP del cable (DHCP o fija)','i','ip')
 
@@ -1629,6 +1630,22 @@ def ui_logs(kind):
     for line in lines or ['(vacío)']:s.small(line)
     return s
 
+def ui_ssh(arg):
+    c=ssh_conf();keys=len(ssh_keys());s=Screen('ssh','Acceso SSH','nav:sys',10)
+    s.toggle('ssh.on:0' if c['enabled'] else 'ssh.on:1','SSH',c['enabled'])
+    if c['enabled']:
+        s.toggle('ssh.lan:0' if c['lan'] else 'ssh.lan:1','Desde la red local',c['lan'])
+        s.toggle('ssh.vpn:0' if c['vpn'] else 'ssh.vpn:1','Desde la VPN',c['vpn'])
+        s.gap().label('Para entrar:').small('USB: root@192.168.77.1','g')
+        if c['lan']:
+            ips=lan_ips()
+            for ip in ips:s.small('Red local: root@'+ip,'g')
+            if not ips:s.small('Red local: sin IP (conecta la Wi-Fi o el cable)','y')
+        if c['vpn']:s.small('VPN: root@10.66.0.1','g')
+    else:s.small('No acepta conexiones nuevas por ningún lado, tampoco por USB.','m')
+    s.small('%d clave%s autorizada%s.'%(keys,'' if keys==1 else 's','' if keys==1 else 's') if keys else 'Ninguna clave autorizada: añádela en el panel web (Acceso SSH).','g' if keys else 'y')
+    return s.small('Solo con clave, nunca con contraseña ni desde Internet.','m')
+
 def ui_sys(arg):
     s=Screen('sys','Sistema',refresh=5)
     try:
@@ -1638,7 +1655,7 @@ def ui_sys(arg):
         s.label('RAM libre: %d / %d MB'%(mem.get('MemAvailable',mem.get('MemFree',0))//1024,mem['MemTotal']//1024))
     except (OSError,KeyError,ValueError):pass
     s.label('Kernel '+os.uname().release,'m').small(BRAND,'m').small(REPO,'m')
-    s.button('nav:watch','Vigilantes y reinicio','i','vpn').button('nav:update','Actualizar','i','update').small('Copia de seguridad: desde el panel web.','m')
+    s.button('nav:ssh','Acceso SSH','i','lock').button('nav:watch','Vigilantes y reinicio','i','vpn').button('nav:update','Actualizar','i','update').small('Copia de seguridad: desde el panel web.','m')
     return s.button('nav:reboot','Reiniciar J1','d','power').button('nav:poweroff','Apagar J1','d','power')
 
 # speed test through whatever link has the route (cable or Wi-Fi), in the background
@@ -1728,7 +1745,7 @@ def ui_power(arg):
 
 UI_SCREENS={'home':lambda a:ui_home(),'wifi':ui_wifi,'wifinet':ui_wifinet,'wifihidden':ui_wifihidden,'ap':ui_ap,
     'ip':ui_ip,'vpn':ui_vpn,'client':ui_client,'qr':ui_qr,'del':ui_del,'dns':ui_dns,'usb':ui_usb,'logs':ui_logs,
-    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz,'bat':ui_bat,'panel':ui_panel,'camqr':ui_camqr}
+    'sys':ui_sys,'reboot':ui_reboot,'poweroff':ui_poweroff,'qr6':ui_qr6,'wifiqr':ui_wifiqr,'disp':ui_disp,'res':ui_res,'power':ui_power,'speed':ui_speed,'tz':ui_tz,'bat':ui_bat,'panel':ui_panel,'camqr':ui_camqr,'ssh':ui_ssh}
 
 def ui_action(a, f):
     """Runs a screen action; returns (next screen, message)."""
@@ -1780,10 +1797,10 @@ def ui_action(a, f):
         k=[v for v,_ in WATCH_SCHED];i=k.index(watch_conf()['sched']);watch_save(sched=k[(i+1)%len(k)]);return 'watch',None
     if verb=='watch.hour':
         h=f.get('hour','').strip();watch_save(hour=int(h) if h.isdigit() else -1);return 'watch','Hora guardada'
-    if verb in ('ssh.lan','ssh.vpn'):
+    if verb in ('ssh.on','ssh.lan','ssh.vpn'):
         if arg not in ('0','1'):raise ValueError('Opción no válida')
-        k=verb[4:];ssh_set(**{k:arg=='1'})
-        return 'panel','SSH desde '+('la red local' if k=='lan' else 'la VPN')+' '+('activado' if arg=='1' else 'desactivado')
+        k={'ssh.on':'enabled','ssh.lan':'lan','ssh.vpn':'vpn'}[verb];ssh_set(**{k:arg=='1'})
+        return 'ssh','SSH '+{'enabled':'','lan':'desde la red local ','vpn':'desde la VPN '}[k]+('activado' if arg=='1' else 'desactivado')
     if verb in ('panel.lan','panel.vpn'):
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         k=verb[6:];panel_set(**{k:arg=='1'})

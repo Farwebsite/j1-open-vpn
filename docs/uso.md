@@ -58,7 +58,7 @@ Panel web → sección **Acceso SSH**:
 
 - **Generar una clave y descargarla:** el J1 crea un par de claves, autoriza la pública y te descarga la privada (`j1-open-vpn-ssh-key`). Guárdala bien: no se puede volver a descargar.
 - **O pega tu clave pública** (`id_ed25519.pub`) si ya tienes una.
-- **También desde la red local** (Wi-Fi o cable de casa) y **también desde la VPN**: también en la pantalla del J1, en *Panel web*. Si el J1 está lejos, la red local es la forma de volver a entrar desde otro equipo de esa red cuando la VPN falla. No abras el puerto 22 en el router.
+- **SSH activado**, **también desde la red local** (Wi-Fi o cable de casa) y **también desde la VPN**: también en la pantalla del J1, en *Sistema → Acceso SSH*, que muestra las direcciones para entrar. Desactivado no acepta conexiones nuevas por ningún lado, tampoco por USB (la sesión abierta sigue); se vuelve a activar desde la pantalla. Si el J1 está lejos, la red local es la forma de volver a entrar desde otro equipo de esa red cuando la VPN falla. No abras el puerto 22 en el router.
 - **Desactivar SSH** borra todas las claves autorizadas.
 
 Para entrar (PowerShell en Windows 10/11, o Linux/macOS):
