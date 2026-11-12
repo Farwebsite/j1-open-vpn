@@ -145,7 +145,7 @@ class Tests(unittest.TestCase):
   self.assertIn(b'\nV\t255\n',out);self.assertIn(b'\nO\t0\n',out);self.assertIn(b'\nD\tdisp.bright\t255\t15\t255\n',out)
   self.assertIn(b'\te\n',app.ui_request(b'a=disp.bright%3A7&s=disp'));self.assertEqual(app.display_brightness(),255)
  def test_web_panel(self):
-  self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':False})
+  self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':False,'https':False})
   lan=lambda:[app.ipaddress.ip_interface('10.10.1.40/24')]
   with patch.object(app,'lan_nets',lan):
    # peers: AP client, USB PC, home PC, VPN client, Internet
@@ -160,7 +160,7 @@ class Tests(unittest.TestCase):
    self.assertIn(b'\te\n',app.ui_request(b'a=panel.vpn%3Ax&s=panel'))
    out=app.ui_request(b'a=panel.off&s=panel');self.assertIn(b'S\tpanel.on\tPanel web\t0',out)
    self.assertEqual(ok(),[False]*5);self.assertFalse(app.panel_allowed('nonsense'))
-   app.ui_request(b'a=panel.on&s=panel');self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':True})
+   app.ui_request(b'a=panel.on&s=panel');self.assertEqual(app.panel_conf(),{'enabled':True,'lan':False,'vpn':True,'https':False})
   self.assertIn(b'C\tnav:panel\tPanel web\tpanel\n',app.ui_request(b'a=nav%3Ahome'))
  def test_panel_lan_fixed_ip(self):
   # a fixed IP is /32 on the interface; the subnet only shows in the routes
@@ -406,4 +406,125 @@ class Tests(unittest.TestCase):
    # limit off while paused: charging comes back at once
    app.bat_limit_save(90);put(capacity='92',status='Discharging',batt_slate_mode='1');app.bat_limit_save(0);self.assertEqual(slate.read_text(),'0')
   app.BAT_HIST.clear()
+ def vpn0(self):app.save('vpn.json',{'port':53,'endpoint':'','private_key':'K','public_key':'P','clients':[]})   # page() without wg
+ def test_client_pause_and_stats(self):
+  app.save('vpn.json',{'port':53,'endpoint':'','private_key':'K','public_key':'P','clients':[
+   {'id':'a'*16,'name':'Móvil','ip':2,'private_key':'x','public_key':'PUBA','psk':'S'},{'id':'b'*16,'name':'Portátil','ip':3,'private_key':'y','public_key':'PUBB','psk':'T'}]})
+  peers={'PUBA':{'endpoint':'(none)','handshake':int(app.time.time())-60,'rx':2048,'tx':3*1048576}}
+  with patch.object(app,'apply_vpn') as av,patch.object(app,'wg_peers',return_value=peers):
+   s=app.page().decode();self.assertIn('hace 60 s · ↓3.0 MB ↑2.0 KB',s);self.assertIn('nunca',s);self.assertIn('value=pause',s)
+   app.client_pause('a'*16,True);av.assert_called();self.assertTrue(app.load('vpn.json',{})['clients'][0]['paused'])
+   self.assertIn('en pausa',app.page().decode());self.assertIn('Reanudar',app.page().decode())
+   out=app.ui_request(b'a=nav%3Aclient%3A'+b'a'*16).decode('cp437');self.assertIn('En pausa: no puede conectarse',out);self.assertIn('S\tvpn.pause:'+'a'*16+':0\tAcceso a la VPN\t0',out)
+   out=app.ui_request(b'a=vpn.pause%3A'+b'a'*16+b'%3A0').decode('cp437');self.assertIn('Cliente reanudado',out);self.assertFalse(app.load('vpn.json',{})['clients'][0]['paused'])
+   self.assertRaises(ValueError,app.client_pause,'c'*16,True)
+  # a paused client has no peer in WireGuard
+  v=app.load('vpn.json',{});v['clients'][1]['paused']=True;app.save('vpn.json',v)
+  with patch.object(app,'command',return_value='') as cmd,patch.object(app,'firewall',return_value=True),patch.object(app.Path,'exists',return_value=True):
+   app.apply_vpn()
+  conf=(app.RUN/'wg0.conf').read_text();self.assertIn('PUBA',conf);self.assertNotIn('PUBB',conf)
+ def test_notifications(self):
+  c=app.notify_conf();self.assertRegex(c['topic'],r'^j1-[0-9a-f]{20}$');self.assertFalse(c['enabled']);self.assertEqual(app.notify_url(),'https://ntfy.sh/'+c['topic'])
+  sent=[]
+  with patch.object(app,'notify_send',side_effect=lambda *a:sent.append(a)),patch.object(app.threading,'Thread') as T:
+   T.side_effect=lambda target,daemon:type('T',(),{'start':lambda s:target()})()
+   self.assertFalse(app.notify('power','t','x'))   # off: nothing
+   app.notify_save(enabled=True,events=['power','client'])
+   self.assertTrue(app.notify('power','t','x'));self.assertFalse(app.notify('bat','t','x'));self.assertEqual(len(sent),1)
+   # watch: charger out and back, a client connecting; first look only learns the state
+   bat={'cap':80,'status':'Charging','temp':30,'v':4.0,'soc':80,'ma':None}
+   app.save('vpn.json',{'port':53,'endpoint':'','private_key':'K','public_key':'P','clients':[{'id':'a'*16,'name':'Móvil','ip':2,'private_key':'x','public_key':'PUBA','psk':'S'}]})
+   peers={}
+   app.WATCH.update({'power':None,'low':False,'hot':False,'vpn_err':None,'clients':None,'boot':None});sent.clear()
+   with patch.object(app,'bat_read',side_effect=lambda:dict(bat)),patch.object(app,'wg_peers',side_effect=lambda:peers):
+    app.notify_watch();self.assertEqual(sent,[])
+    bat['status']='Discharging';app.notify_watch();self.assertEqual(sent[-1][0],'J1: sin corriente');self.assertIn('80%',sent[-1][1])
+    bat['status']='Paused';app.notify_watch();self.assertEqual(sent[-1][0],'J1: vuelve la corriente')
+    peers={'PUBA':{'handshake':int(app.time.time())-10}};app.notify_watch();self.assertEqual(sent[-1][0],'J1: Móvil conectado')
+    n=len(sent);app.notify_watch();self.assertEqual(len(sent),n)   # still connected: once
+    bat.update(status='Discharging',cap=15);app.notify_watch();self.assertNotIn('J1: batería baja',[x[0] for x in sent])   # 'bat' not chosen
+   app.notify_save(events=['bat'])
+   with patch.object(app,'bat_read',return_value=dict(bat,status='Discharging',cap=15)),patch.object(app,'wg_peers',return_value={}):
+    app.WATCH['low']=False;app.notify_watch();self.assertEqual(sent[-1][0],'J1: batería baja')
+  # no IPs, keys or the client's address in any text
+  for t in sent:self.assertNotRegex(t[0]+t[1],r'\d+\.\d+\.\d+\.\d+')
+  self.assertRaises(ValueError,app.notify_save,server='http://ntfy.sh')
+  old=app.notify_conf()['topic'];app.notify_save(new_topic=True);self.assertNotEqual(app.notify_conf()['topic'],old)
+  self.vpn0()
+  with patch.object(app,'qr_rows',return_value=['101']):out=app.ui_request(b'a=nav%3Anotify').decode('cp437');self.assertIn('S\tnotify.off\tAvisos\t1',out);self.assertIn('\nQ\t',out)
+  self.assertIn('C\tnav:notify\tAvisos\tnotify',app.ui_request(b'a=nav%3Ahome').decode('cp437'))
+  self.assertIn('name=action value=notify>',app.page().decode())
+ def test_notify_ip_change(self):
+  app.RUNTIME.pop('ip4',None)
+  with patch.object(app,'notify') as n:
+   app.notify_ip('203.0.113.8');n.assert_not_called();app.notify_ip('203.0.113.8');n.assert_not_called()
+   app.notify_ip('198.51.100.7');n.assert_called_once();self.assertNotIn('198.51',str(n.call_args))
+ def test_backup_roundtrip(self):
+  db=pathlib.Path(self.tmp.name)/'dropbear';db.mkdir();(db/'dropbear_ed25519_host_key').write_bytes(b'HOSTKEY')
+  app.save('vpn.json',{'port':53,'clients':[]});(app.STATE/'wifi.conf').write_text('net');(app.STATE/'mac.info').write_text('MAC');(app.STATE/'random-seed').write_bytes(b'r')
+  with patch.object(app,'DROPBEAR',db):
+   self.assertRaises(ValueError,app.backup_make,'short','short');self.assertRaises(ValueError,app.backup_make,'longenough','different')
+   blob=app.backup_make('correct horse','correct horse')
+   self.assertTrue(blob.startswith(app.BACKUP_MAGIC))
+   names=dict(app.backup_open(blob,'correct horse'))
+   self.assertEqual(names['config/wifi.conf'],b'net');self.assertEqual(names['dropbear/dropbear_ed25519_host_key'],b'HOSTKEY')
+   self.assertNotIn('config/mac.info',names);self.assertNotIn('config/random-seed',names)
+   self.assertRaises(ValueError,app.backup_open,blob,'wrong password')
+   bad=bytearray(blob);bad[-40]^=1;self.assertRaises(ValueError,app.backup_open,bytes(bad),'correct horse')
+   self.assertRaises(ValueError,app.backup_open,b'not a backup','x')
+   # restore writes the files back and reboots
+   (app.STATE/'wifi.conf').write_text('changed');(db/'dropbear_ed25519_host_key').write_bytes(b'OTHER')
+   with patch.object(app,'reboot_soon') as rb:self.assertEqual(app.backup_restore(blob,'correct horse'),3);rb.assert_called_once()
+   self.assertEqual((app.STATE/'wifi.conf').read_text(),'net');self.assertEqual((db/'dropbear_ed25519_host_key').read_bytes(),b'HOSTKEY')
+ def test_backup_rejects_paths(self):
+  import tarfile
+  buf=io.BytesIO()
+  with tarfile.open(fileobj=buf,mode='w:gz') as t:
+   for n in ('config/vpn.json','config/../../etc/passwd'):
+    i=tarfile.TarInfo(n);i.size=2;t.addfile(i,io.BytesIO(b'{}'))
+  salt=b's'*16;nonce=b'n'*12;head=app.BACKUP_MAGIC+salt+nonce
+  blob=head+app.aes_gcm(app.backup_key('password1',salt),nonce,head,buf.getvalue())
+  self.assertRaisesRegex(ValueError,'inesperado',app.backup_open,blob,'password1')
+ def test_multipart_restore_form(self):
+  body=(b'--X\r\nContent-Disposition: form-data; name="csrf"\r\n\r\nabc\r\n--X\r\nContent-Disposition: form-data; name="file"; filename="c.j1bak"\r\n'
+        b'Content-Type: application/octet-stream\r\n\r\n\x00\x01BIN\r\n--X--\r\n')
+  self.vpn0();f,files=app.multipart('multipart/form-data; boundary=X',body);self.assertEqual(f,{'csrf':'abc'});self.assertEqual(files,{'file':b'\x00\x01BIN'})
+  s=app.page().decode();self.assertIn('enctype=multipart/form-data',s);self.assertIn('value=backup>',s)
+ def test_update_check_and_screen(self):
+  rel=pathlib.Path(self.tmp.name)/'release';rel.write_text('j1-open-vpn 1.4.4 (Alpine 3.24.4)\n')
+  api=json.dumps({'tag_name':'v1.4.5','assets':[{'name':n,'browser_download_url':'https://example/'+n} for n in ('j1-open-vpn-rootfs.tar.gz','SHA256SUMS','j1-open-vpn-boot.img')]}).encode()
+  app.UPD.update(state='',busy=False,latest=None);self.vpn0()
+  with patch.object(app,'RELEASE_FILE',rel),patch.object(app,'http_get',return_value=(api,'')),patch.object(app,'kernel_same',return_value=False):
+   self.assertEqual(app.release_current(),'1.4.4');self.assertRaises(ValueError,app.update_start)
+   app.update_look();self.assertIn('Hay una versión nueva: 1.4.5',app.UPD['state']);self.assertIn('kernel',app.UPD['state'])
+   out=app.ui_request(b'a=nav%3Aupdate').decode('cp437');self.assertIn('Versión instalada: 1.4.4',out);self.assertIn('B\tupdate.run\tInstalar la 1.4.5 y reiniciar',out)
+   self.assertIn('Instalar la 1.4.5',app.page().decode())
+   rel.write_text('j1-open-vpn 1.4.5 (Alpine 3.24.4)\n');app.update_look();self.assertIn('Tienes la última versión (1.4.5)',app.UPD['state'])
+   self.assertRaises(ValueError,app.update_start)
+  self.assertEqual(app.vtuple('1.10.0')>app.vtuple('1.9.9'),True)
+  self.assertIn('B\tnav:update\tActualizar',app.ui_request(b'a=nav%3Asys').decode('cp437'))
+  app.UPD.update(state='',busy=False,latest=None)
+ def test_boot_kernel_compare(self):
+  def img(k,r):
+   h=bytearray(2048);h[:8]=b'ANDROID!';app.struct.pack_into('<8I',h,8,len(k),0,len(r),0,0,0,0,2048)
+   return bytes(h)+k+bytes(-len(k)%2048)+r
+  self.assertEqual(app.boot_kernel(img(b'K'*5000,b'R1')),app.boot_kernel(img(b'K'*5000,b'R2')))   # ramdisk ignored
+  self.assertNotEqual(app.boot_kernel(img(b'K'*5000,b'R')),app.boot_kernel(img(b'J'*5000,b'R')))
+  self.assertIsNone(app.boot_kernel(b'garbage'))
+ def test_https_redirect_and_fingerprint(self):
+  self.assertEqual(app.https_fingerprint(),'');self.vpn0()
+  app.panel_set(https=True);self.assertTrue(app.panel_conf()['https'])
+  class H:pass
+  h=H();h.headers={'Host':'192.168.78.1:80'};h.connection=type('C',(),{'getsockname':lambda s:('192.168.77.1',80)})()
+  sent=[];h.send_response=lambda c:sent.append(c);h.send_header=lambda k,v:sent.append((k,v));h.end_headers=lambda:None
+  self.assertTrue(app.Handler.to_https(h));self.assertIn(('Location','https://192.168.78.1/'),sent)
+  sent.clear();h.headers={'Host':'evil.com\r\nX: y'};app.Handler.to_https(h);self.assertIn(('Location','https://192.168.77.1/'),sent)
+  app.panel_set(https=False);self.assertFalse(app.Handler.to_https(h))
+  out=app.ui_request(b'a=nav%3Apanel').decode('cp437');self.assertIn('S\tpanel.https:1\tCifrado HTTPS\t0',out)
+  self.assertIn('id=https',app.page().decode())
+ @unittest.skipUnless(__import__('shutil').which('openssl'),'sin openssl')
+ def test_https_certificate(self):
+  app.https_cert();pem=(app.STATE/'https.pem').read_text();self.assertIn('PRIVATE KEY',pem);self.assertIn('CERTIFICATE',pem)
+  self.assertRegex(app.https_fingerprint(),r'^([0-9A-F]{2}:){31}[0-9A-F]{2}$');self.assertEqual(list(app.RUN.glob('https-*')),[])
+  import ssl;ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);ctx.load_cert_chain(app.cert_path())
 if __name__=='__main__':unittest.main(verbosity=2)

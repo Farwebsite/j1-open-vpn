@@ -17,7 +17,7 @@ Vistas del inicio:
 
 - **Wi-Fi:** encender/apagar el Wi-Fi cliente, buscar redes, red oculta, IP fija, QR de la red guardada.
 - **Red de configuración:** la red propia del J1 (`DIRECT-J1-VPN-XXXX`). Se puede apagar y cambiar su clave (que es también la del panel web mientras el panel no tenga contraseña propia). *QR para conectarse* muestra un código para entrar desde otro móvil.
-- **WireGuard:** puerto, dominio, UPnP, clientes (crear, ver última conexión y tráfico, **QR**, quitar).
+- **WireGuard:** puerto, dominio, UPnP, clientes (crear, ver última conexión y tráfico, **QR**, **pausar**, quitar). Un cliente en pausa no puede conectarse pero conserva su perfil: al reanudarlo funciona sin importarlo de nuevo.
 - **Cloudflare DNS:** DNS dinámico (ver abajo).
 - **Cable USB:** estado del adaptador de red, 5 V automáticos, IP del cable.
 - **Recursos:** CPU total y por proceso, RAM, disco y tráfico.
@@ -25,9 +25,10 @@ Vistas del inicio:
 - **Pantalla:** brillo (deslizador), pantalla de bloqueo y tiempo de apagado. En los últimos segundos se atenúa; un toque la recupera.
 - **Pantalla de bloqueo** (activada de serie; también se cambia en el panel web, sección *Pantalla de bloqueo*): cuando la pantalla se apaga, un toque o un botón solo muestran la hora y la batería, y hay que deslizar el círculo hasta el final para usarla. Así una mano apoyada encima no pulsa nada. Sin desbloquear vuelve a apagarse a los 10 s. Mantener el botón de encendido abre el menú de apagado igualmente (salvo con código).
 - **Código de desbloqueo** (opcional, en *Pantalla*, con la pantalla de bloqueo activada): de 4 a 8 cifras, escrito dos veces. Tras deslizar sale un teclado numérico. Con código el J1 arranca bloqueado y el botón de encendido no se salta el bloqueo. Intentos: los 4 primeros fallos seguidos solo avisan; del 5.º al 9.º hay que esperar 30 s, 1, 2, 4 y 8 min; al **10.º fallo seguido la pantalla se bloquea por completo** (no acepta ningún código, ni el correcto) hasta desbloquearla desde el panel web (*Pantalla de bloqueo* → *Desbloquear la pantalla*). El contador se guarda en disco: reiniciar no lo pone a cero. El J1 solo guarda un hash (PBKDF2 con sal): protege frente a quien toca la pantalla, no frente a quien extrae la memoria del teléfono (con 4-8 cifras se puede adivinar fuera del J1), así que mejor 6 cifras o más. **Si lo olvidas:** panel web → *Pantalla de bloqueo* → *Quitar el código de desbloqueo* (necesitas la clave del panel o tu clave SSH). Desactivar la pantalla de bloqueo también lo borra. En la pantalla, **quitar el código o desactivar el bloqueo pide el código actual** (los fallos cuentan igual que al desbloquear); desde el panel web se puede quitar sin él, por si se olvida.
+- **Avisos:** avisos al móvil (ver abajo).
 - **Registros:** sistema, red, VPN y kernel.
 - **Velocidad** y **Zona horaria:** cada una con su propio acceso en el inicio (ver abajo).
-- **Sistema:** encendido, carga, RAM, reiniciar y apagar.
+- **Sistema:** encendido, carga, RAM, **Actualizar** (ver abajo), reiniciar y apagar.
 
 Con la pantalla apagada se borra la memoria de vídeo: un código QR no se queda guardado.
 
@@ -42,6 +43,7 @@ En la pantalla, **Panel web** (baldosa de la segunda página del inicio):
 - **Panel web** activado/desactivado. Desactivado, el puerto 80 queda cerrado; la pantalla sigue funcionando igual.
 - **Acceso desde la red local** (desactivado de serie): el panel responde también en la IP del J1 en tu red de casa (Wi-Fi o cable), sea fija o por DHCP; la pantalla muestra la dirección (`http://IP-del-J1`). En la red local va sin cifrar (HTTP): úsalo solo en casa. Solo entran equipos de la misma subred que el J1.
 - **Acceso desde la VPN** (desactivado de serie): desde un dispositivo conectado a WireGuard, en cualquier sitio, en **http://10.66.0.1**. El túnel ya va cifrado. Desactivado, un cliente de la VPN no llega al panel por ninguna dirección.
+- **Cifrado HTTPS** (desactivado de serie): el panel va cifrado también en la red de casa, en `https://`. El certificado lo crea el propio J1, así que el navegador avisa la primera vez: acéptalo si la huella SHA-256 coincide con la de la pantalla o la del panel (sección *HTTPS*). Con HTTPS activado, `http://` solo redirige a `https://`.
 - **IP de la Wi-Fi / IP del cable:** accesos directos para poner esa IP por DHCP o fija.
 
 El panel **no** debe publicarse en Internet: no redirijas el TCP 80 en el router.
@@ -112,6 +114,30 @@ Así el router solo necesita una redirección de puerto.
 **Velocidad → Empezar** (acceso en el inicio). Mide ping, bajada y subida contra `speed.cloudflare.com` por el enlace activo (cable o Wi-Fi). Tarda unos 25 s y gasta 100–200 MB. Para la VPN cuenta sobre todo la **subida**: es lo que el J1 puede enviar a tus dispositivos cuando estás fuera.
 
 Por Wi-Fi la VPN rinde menos de lo que marca la prueba: cada dato entra y sale por el mismo Wi-Fi.
+
+## Avisos al móvil
+
+El J1 puede avisarte en el móvil (pantalla *Avisos* o panel web, sección *Avisos al móvil*) cuando:
+
+- se va o vuelve la corriente (se desconecta el cargador) y cuando se enciende;
+- la batería está baja (20 %) o caliente (45 °C);
+- la VPN da un error o vuelve a funcionar;
+- cambia la IP pública de casa (con el DNS de Cloudflare activado);
+- se conecta un cliente de la VPN.
+
+Usa [ntfy](https://ntfy.sh): instala su app (o usa el navegador) y suscríbete a la dirección que muestra el J1, también como QR en la pantalla. El tema es una cadena secreta generada en el J1: quien la conozca puede leer los avisos, por eso los textos **no llevan IPs, claves ni contraseñas**. *Cambiar el tema secreto* deja de enviar al anterior. Por defecto usa el servidor público `ntfy.sh`; en el panel se puede poner uno propio (`https://`). Vienen desactivados: actívalos y pulsa *Enviar aviso de prueba*.
+
+## Copia de seguridad
+
+Panel web → *Copia de seguridad*. **Descargar copia** guarda en un archivo `.j1bak` la configuración: clientes de la VPN, Wi-Fi, Cloudflare, avisos, contraseñas, certificado HTTPS y claves SSH. Va cifrado (AES-256-GCM, clave derivada con scrypt) con la contraseña que elijas: sin ella no se puede abrir, apúntala. No incluye lo propio de cada teléfono (MAC Wi-Fi, semillas aleatorias).
+
+**Restaurar y reiniciar** sustituye la configuración por la de la copia y reinicia el J1. Sirve para reinstalar o pasar a otro J1 sin volver a configurar los clientes: sus perfiles siguen valiendo.
+
+## Actualizar
+
+Pantalla *Sistema* → *Actualizar*, o panel web → *Actualizar*. *Buscar actualizaciones* mira la última versión publicada en GitHub. *Instalar* descarga el sistema, comprueba su suma SHA-256 con `SHA256SUMS`, lo descomprime junto al actual y lo cambia en el siguiente arranque (el J1 se reinicia solo; un minuto sin VPN). La configuración y las tablas de la cámara se conservan, y el sistema anterior queda guardado como `<carpeta>.old`.
+
+Solo se actualiza el sistema: la imagen de arranque (kernel) no se toca. Si la versión nueva trae otro kernel, el J1 lo dice; para tenerlo hay que reinstalar la imagen de arranque (ver [Instalación](instalacion.md)).
 
 ## Zona horaria
 

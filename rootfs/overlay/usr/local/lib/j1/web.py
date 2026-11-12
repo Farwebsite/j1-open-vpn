@@ -1,7 +1,8 @@
 #!/usr/bin/python3
 """Personal J1 appliance controller. SPDX-License-Identifier: GPL-2.0"""
 import base64, hashlib, hmac, html, http.server, ipaddress, json, os, re, secrets
-import signal, socketserver, subprocess, threading, time, unicodedata, urllib.error, urllib.parse, urllib.request
+import signal, socketserver, ssl, struct, subprocess, tarfile, threading, time, unicodedata, urllib.error, urllib.parse, urllib.request
+import io, gzip, ctypes, ctypes.util
 from pathlib import Path
 STATE = Path(os.environ.get('J1_STATE', '/etc/j1'))
 RUN = Path(os.environ.get('J1_RUN', '/run'))
@@ -100,12 +101,17 @@ ICONS_SVG={
     'bat':'M334 427Q346 427 354.5 418.5Q363 410 363 398V71Q363 59 354.5 51Q346 43 334 43H178Q166 43 157.5 51Q149 59 149 71V398Q149 410 157.5 418.5Q166 427 178 427H213V469H299V427Z',
     'download':'M107 85H405V128H107ZM405 320H320V448H192V320H107L256 171Z',
     'user':'M427 128V85H85V128Q85 166 143.5 189.5Q202 213 256 213Q310 213 368.5 189.5Q427 166 427 128ZM316 281Q291 256 256 256Q221 256 196 281Q171 306 171 341Q171 376 196 401.5Q221 427 256 427Q291 427 316 401.5Q341 376 341 341Q341 306 316 281Z',
+    'notify':'M384 171 427 128V107H85V128L128 171V277Q128 327 153.5 364Q179 401 224 412V427Q224 440 233 449.5Q242 459 256 459Q270 459 279 449.5Q288 440 288 427V412Q333 401 358.5 364Q384 327 384 277ZM256 43Q238 43 225.5 55Q213 67 213 85H299Q299 68 286 55.5Q273 43 256 43Z',
+    'backup':'M299 235H363L256 341L149 235H213V149H299ZM413 298Q454 295 483 264.5Q512 234 512 192Q512 148 480.5 116.5Q449 85 405 85H128Q75 85 37.5 122.5Q0 160 0 213Q0 260 33.5 297.5Q67 335 114 340Q135 379 173 403Q211 427 256 427Q310 427 356.5 389Q403 351 413 298Z',
+    'update':'M341 235 256 149 171 235H235V341H277V235ZM363 107V405H149V107ZM363 490Q380 490 392.5 477.5Q405 465 405 448V64Q405 47 392.5 34Q380 21 363 21H149Q132 21 119.5 34Q107 47 107 64V448Q107 465 119.5 478Q132 491 149 491Z',
+    'https':'M322 341V384Q322 411 302.5 430.5Q283 450 256 450Q229 450 209.5 430.5Q190 411 190 384V341ZM226 162Q239 149 256 149Q273 149 286 162Q299 175 299 192Q299 209 286 222Q273 235 256 235Q239 235 226 222Q213 209 213 192Q213 175 226 162ZM384 341Q401 341 414 328.5Q427 316 427 299V85Q427 68 414 55.5Q401 43 384 43H128Q111 43 98 55.5Q85 68 85 85V299Q85 316 98 328.5Q111 341 128 341H149V384Q149 428 180.5 459.5Q212 491 256 491Q300 491 331.5 459.5Q363 428 363 384V341Z',
 }
 # ---- end of icons
 # each section: icon and color of its tile on the screen
-SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap','#64d2ff'),('bat','Batería','bat','#34c759'),('vpn','WireGuard','vpn','#ff9f0a'),
+SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap','#64d2ff'),('bat','Batería','bat','#34c759'),('vpn','WireGuard','vpn','#ff9f0a'),('avisos','Avisos al móvil','notify','#ff375f'),
           ('dns','Cloudflare DNS','dns','#0a84ff'),('usb','Cable USB','cable','#bf5af2'),('clave','Contraseña del panel','key','#5ac8fa'),
-          ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'))
+          ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'),
+          ('https','HTTPS','https','#30d158'),('copia','Copia de seguridad','backup','#30d158'),('actualizar','Actualizar','update','#0a84ff'))
 # moves the page dots of the phone home screen (the swipe itself is CSS)
 DOTS_JS=(b"(function(){var n=document.querySelector('nav.pages'),d=document.querySelectorAll('.dots i');if(!n||!d.length)return;"
          b"function u(){var p=Math.round(n.scrollLeft/n.clientWidth);for(var i=0;i<d.length;i++)d[i].className=i==p?'on':''}"
@@ -208,6 +214,7 @@ def apply_vpn():
             else: raise RuntimeError('WireGuard no ha creado su interfaz')
         lines=['[Interface]','PrivateKey = '+v['private_key'],'ListenPort = '+str(v['port'])]
         for c in v['clients']:
+            if c.get('paused'):continue   # paused: no peer, so no tunnel, until resumed
             lines += ['','[Peer]','PublicKey = '+c['public_key'],'PresharedKey = '+c['psk'],
                       'AllowedIPs = 10.66.0.%s/32, fd66:6a31::%x/128' % (c['ip'],c['ip'])]
         atomic(RUN/'wg0.conf', '\n'.join(lines)+'\n')
@@ -243,6 +250,17 @@ def client_delete(cid):
         try:apply_vpn()
         except Exception:v['clients']=old;save('vpn.json',v);raise
         log('Cliente VPN revocado')
+
+def client_pause(cid, paused):
+    with LOCK:
+        v=ensure_vpn_state();c=next((c for c in v['clients'] if c['id']==cid),None)
+        if c is None:raise ValueError('El cliente ya no existe')
+        c['paused']=bool(paused);save('vpn.json',v);apply_vpn()
+        log('Cliente VPN '+('en pausa' if paused else 'reanudado'))
+def client_state(c, p):
+    # one line for the screen and the web: paused, last connection, traffic
+    if c.get('paused'):return 'en pausa'
+    return ago(p.get('handshake',0))+(' · ↓%s ↑%s'%(size_h(p.get('tx',0)),size_h(p.get('rx',0))) if p.get('handshake') else '')
 
 def client_profile(cid, fallback, endpoint=None):
     v=ensure_vpn_state();c=next((c for c in v['clients'] if c['id']==cid),None)
@@ -311,6 +329,7 @@ def update_ddns():
         RUNTIME['ddns']='Faltan ajustes';return
     public=str(ipaddress.IPv4Address(public_ip('https://1.1.1.1/cdn-cgi/trace')))
     if cf_upsert(s,'A',s['hostname'],public):log('DNS VPN actualizado')
+    notify_ip(public)
     RUNTIME['ddns']='Actualizado: '+public
     atomic(RUN/'ddns-status',RUNTIME['ddns']+'\n')
 
@@ -565,6 +584,12 @@ def ap_section():
         '<input type=hidden name=action value=appass>'+'<label>Contraseña actual del panel<input type=password name=current autocomplete=current-password></label>'+
         '<label>Clave nueva (8 a 63 caracteres)<input type=password name=pw minlength=8 maxlength=63 autocomplete=new-password></label><label>Repítela<input type=password name=pw2 maxlength=63 autocomplete=new-password></label>'
         '<button>Cambiar clave de la red</button></form></section>')
+def https_section():
+    on=panel_conf()['https'];fp=https_fingerprint()
+    return ('<section id=https><h2>Conexión segura (HTTPS)</h2><p>'+('Activada: el panel va cifrado también en la red de casa.' if on else 'Desactivada: en la red de casa el panel va sin cifrar (por la VPN ya va cifrado).')+'</p>'
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=https><input type=hidden name=on value='+('0' if on else '1')+'><button class='+('sec' if on else '')+'>'+('Desactivar' if on else 'Activar')+' HTTPS</button>'
+        '<small>El certificado lo crea el propio J1, así que el navegador avisa la primera vez: acéptalo si la huella coincide. Con HTTPS, http:// redirige a https://.</small></form>'+
+        ('<p class=muted>Huella SHA-256 del certificado:<br><code>'+esc(fp)+'</code></p>' if fp else '')+'</section>')
 def ssh_section():
     n=len(ssh_keys())
     state='Activo: %d clave%s autorizada%s.'%(n,'' if n==1 else 's','' if n==1 else 's') if n else 'Desactivado (ninguna clave autorizada).'
@@ -598,12 +623,16 @@ def page(message='',error=False):
     for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
     out+=['</select><details><summary>Red oculta o nombre manual</summary><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off></label></details><label>Contraseña Wi-Fi<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Guardar y conectar</button></form><p><small>La red de configuración se mantiene disponible.</small></p></section>',usb_section(),bat_section()]
     out+=['<section id=vpn><h2>WireGuard</h2><p>'+esc(RUNTIME['vpn'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=vpn><label>Puerto UDP<input type=number name=port min=1 max=65535 required value="'+str(v['port'])+'"></label><label>Dominio o IP de conexión<input name=endpoint value="'+esc(v.get('endpoint',''))+'" placeholder="vpn2.tudominio.com"></label><small>Vacío: usa el dominio de Cloudflare o la IP de acceso actual. Web en TCP 80; VPN en UDP. Si cambias el puerto o dominio, descarga otra vez los perfiles.</small><br><button>Guardar puerto y dirección</button></form><h3>Clientes</h3><ul class=list>'+('' if v['clients'] else '<li><small>Ninguno todavía.</small></li>')]
+    peers=wg_peers()
     for c in v['clients']:
-        out.append('<li><span class=tile>'+icon('user','#0a84ff')+'</span><span class=who><b>'+esc(c['name'])+'</b><small>10.66.0.'+str(c['ip'])+'</small></span>'
-                   '<a class=btn2 href="/client/'+c['id']+'.conf">'+icon('download')+'.conf</a><form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar</button></form></li>')
-    out+=['</ul><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor.</small></p></section>']
+        pa=c.get('paused')
+        out.append('<li><span class=tile>'+icon('user','#0a84ff')+'</span><span class=who><b>'+esc(c['name'])+'</b><small>10.66.0.'+str(c['ip'])+' · '+esc(client_state(c,peers.get(c['public_key'],{})))+'</small></span>'
+                   '<a class=btn2 href="/client/'+c['id']+'.conf">'+icon('download')+'.conf</a>'
+                   '<form method=post>'+hidden()+'<input type=hidden name=action value=pause><input type=hidden name=id value="'+c['id']+'"><input type=hidden name=on value='+('0' if pa else '1')+'><button class=sec>'+('Reanudar' if pa else 'Pausar')+'</button></form>'
+                   '<form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar</button></form></li>')
+    out+=['</ul><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor. En pausa no puede conectarse, pero conserva su perfil: al reanudarlo vuelve a funcionar sin importarlo de nuevo. ↓ es lo que ha recibido el cliente; ↑, lo que ha enviado.</small></p></section>']
     checked=' checked' if cf.get('enabled') else ''
-    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+ssh_section()+'</main></div><script src="/j1.js" defer></script><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p></footer></html>']
+    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+notify_section()+https_section()+ssh_section()+backup_section()+update_section()+'</main></div><script src="/j1.js" defer></script><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p></footer></html>']
     return with_icons(''.join(out)).encode()
 
 # ---- web panel: on/off and who may reach it (set from the screen) ----
@@ -615,7 +644,7 @@ VPN_NET=ipaddress.ip_network('10.66.0.0/24')
 PANEL_CHANGED=threading.Event()
 def panel_conf():
     c=load('panel.json',{})
-    return {'enabled':c.get('enabled',True) is not False,'lan':c.get('lan') is True,'vpn':c.get('vpn') is True}
+    return {'enabled':c.get('enabled',True) is not False,'lan':c.get('lan') is True,'vpn':c.get('vpn') is True,'https':c.get('https') is True}
 def panel_set(**kw):
     raw=load('panel.json',{});raw.update(kw);save('panel.json',raw);PANEL_CHANGED.set();c=panel_conf()
     extra=[n for n,k in (('red local','lan'),('VPN','vpn')) if c[k]]
@@ -667,16 +696,68 @@ class PanelServer(http.server.ThreadingHTTPServer):
     # one socket for every address (DHCP may change the home one)
     daemon_threads=True
     def verify_request(self,request,client_address):return panel_allowed(client_address[0])
+# ---- HTTPS (optional): certificate made on the J1 itself, self-signed, so the
+# browser warns once; the fingerprint shown on the screen and in the panel lets
+# you check it is this J1's. With HTTPS on, port 80 only redirects to 443.
+def cert_path():return STATE/'https.pem'   # key + certificate, in the configuration (it goes into the backup)
+def https_cert():
+    if not cert_path().exists():
+        key,crt=RUN/'https-key.pem',RUN/'https-crt.pem'
+        try:
+            command(['openssl','req','-x509','-newkey','ec','-pkeyopt','ec_paramgen_curve:P-256','-nodes','-days','3650','-subj','/CN=J1 Open VPN',
+                     '-addext','subjectAltName=IP:192.168.77.1,IP:192.168.78.1,IP:10.66.0.1,DNS:galaxy-j1-linux','-keyout',str(key),'-out',str(crt)],timeout=60)
+            atomic(cert_path(),key.read_text()+crt.read_text())
+        except FileNotFoundError:raise RuntimeError('Falta openssl para crear el certificado')
+        finally:key.unlink(missing_ok=True);crt.unlink(missing_ok=True)
+        log('HTTPS: certificado creado')
+    return cert_path()
+def https_fingerprint():
+    try:pem=cert_path().read_text();i=pem.index('-----BEGIN CERTIFICATE-----')
+    except (OSError,ValueError):return ''
+    h=hashlib.sha256(ssl.PEM_cert_to_DER_cert(pem[i:])).hexdigest().upper()
+    return ':'.join(h[i:i+2] for i in range(0,64,2))
+def https_set(on):
+    if on:https_cert()
+    panel_set(https=bool(on))
+class PanelTLSServer(PanelServer):
+    def __init__(self,addr,handler,ctx):self.ctx=ctx;super().__init__(addr,handler)
+    def finish_request(self,request,client_address):
+        # the TLS handshake in the request's own thread: a slow client blocks nobody
+        request.settimeout(20)
+        try:tls=self.ctx.wrap_socket(request,server_side=True)
+        except (ssl.SSLError,OSError):return
+        try:super().finish_request(tls,client_address)
+        finally:tls.close()
 def panel_serve():
-    srv=None
+    srv=tls=None
     while True:
-        on=panel_conf()['enabled']
+        c=panel_conf();on=c['enabled'];want_tls=on and c['https']
         if on and not srv:
             try:srv=PanelServer(('0.0.0.0',80),Handler);threading.Thread(target=srv.serve_forever,daemon=True).start()
             except OSError:srv=None
         elif srv and not on:srv.shutdown();srv.server_close();srv=None   # port 80 closed
+        if want_tls and not tls:
+            try:
+                ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);ctx.minimum_version=ssl.TLSVersion.TLSv1_2;ctx.load_cert_chain(https_cert())
+                tls=PanelTLSServer(('0.0.0.0',443),Handler,ctx);threading.Thread(target=tls.serve_forever,daemon=True).start()
+            except (OSError,RuntimeError,ssl.SSLError) as e:tls=None;log('HTTPS: no se pudo iniciar: '+type(e).__name__)
+        elif tls and not want_tls:tls.shutdown();tls.server_close();tls=None
         PANEL_CHANGED.wait(3);PANEL_CHANGED.clear()
 
+def multipart(ctype, body):
+    # -> (fields, files) of a multipart/form-data body
+    from email.parser import BytesParser
+    from email import policy
+    msg=BytesParser(policy=policy.HTTP).parsebytes(b'Content-Type: '+ctype.encode('latin1')+b'\r\n\r\n'+body)
+    if not msg.is_multipart():raise ValueError('Solicitud no valida')
+    fields={};files={}
+    for part in msg.iter_parts():
+        name=part.get_param('name',header='content-disposition')
+        if not name:continue
+        data=part.get_payload(decode=True) or b''
+        if part.get_filename() is not None:files[name]=data
+        else:fields[name]=data.decode('utf8','replace')
+    return fields,files
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version='J1-VPN'
     def log_message(self,*args):pass
@@ -695,8 +776,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(code);self.send_header('Content-Type',content);self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff');self.send_header('Content-Security-Policy',"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
         if filename:self.send_header('Content-Disposition','attachment; filename="'+filename+'"')
         self.send_header('Content-Length',str(len(body)));self.end_headers();self.wfile.write(body)
+    def to_https(self):
+        # HTTPS on: plain HTTP only redirects, before asking for the password
+        if not panel_conf()['https'] or isinstance(self.connection,ssl.SSLSocket):return False
+        host=self.headers.get('Host') or ''
+        host=host.split(']')[0]+']' if host.startswith('[') else host.rsplit(':',1)[0]   # without the port
+        if not re.fullmatch(r'[A-Za-z0-9.-]{1,253}|\[[0-9A-Fa-f:]{2,39}\]',host):host=self.connection.getsockname()[0]
+        self.send_response(301);self.send_header('Location','https://'+host+'/');self.send_header('Content-Length','0');self.end_headers();return True
     def do_GET(self):
-        if not self.auth():return
+        if self.to_https() or not self.auth():return
         try:
             m=re.fullmatch(r'/client/([0-9a-f]{16})\.conf',urllib.parse.urlsplit(self.path).path)
             if m:
@@ -708,11 +796,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.respond(body)
         except ValueError as e:self.respond(str(e).encode(),404,'text/plain; charset=utf-8')
     def do_POST(self):
-        if not self.auth():return
+        if self.to_https() or not self.auth():return
         try:
-            size=int(self.headers.get('Content-Length','0'))
-            if not 0<size<=8192:raise ValueError('Solicitud no valida')
-            f={k:v[-1] for k,v in urllib.parse.parse_qs(self.rfile.read(size).decode('utf8'),keep_blank_values=True,max_num_fields=20).items()}
+            size=int(self.headers.get('Content-Length','0'));ctype=self.headers.get('Content-Type','');files={}
+            if ctype.startswith('multipart/form-data'):
+                # only the restore form sends a file (small: a backup is a few KB)
+                if not 0<size<=BACKUP_MAX:raise ValueError('Archivo demasiado grande')
+                f,files=multipart(ctype,self.rfile.read(size))
+            else:
+                if not 0<size<=8192:raise ValueError('Solicitud no valida')
+                f={k:v[-1] for k,v in urllib.parse.parse_qs(self.rfile.read(size).decode('utf8'),keep_blank_values=True,max_num_fields=20).items()}
             if not hmac.compare_digest(f.get('csrf',''),CSRF):raise ValueError('Recarga la página y vuelve a intentarlo')
             action=f.get('action')
             if action=='scan':scan_networks();message=RUNTIME['scan']
@@ -722,6 +815,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 boost=f.get('boost')=='1';usb_set(boost)
                 message='Alimentación USB guardada: '+('automática.' if boost else 'el J1 no dará 5 V.')
             elif action=='delete':client_delete(f.get('id',''));message='Cliente revocado.'
+            elif action=='pause':client_pause(f.get('id',''),f.get('on')=='1');message='Cliente '+('en pausa: no puede conectarse.' if f.get('on')=='1' else 'reanudado.')
             elif action=='vpn':
                 vpn_settings(f.get('port','0'),f.get('endpoint',''))
                 message='Puerto y dirección guardados. Descarga perfiles actualizados.'
@@ -750,6 +844,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 v=f.get('limit','');v=(int(v) if v.isdigit() else -1) if f.get('on')=='1' else 0
                 bat_limit_save(v);message='Carga limitada al %d %%.'%v if v else 'Sin límite de carga.'
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
+            elif action=='notify':
+                notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'])
+                message='Avisos guardados.'
+            elif action=='backup':
+                blob=backup_make(f.get('pw',''),f.get('pw2',''))
+                self.respond(blob,content='application/octet-stream',filename='j1-copia-'+time.strftime('%Y%m%d')+'.j1bak');return
+            elif action=='restore':
+                n=backup_restore(files.get('file',b''),f.get('pw',''));message='Copia restaurada (%d archivos). El J1 se reinicia: vuelve a entrar en un minuto.'%n
+            elif action=='updcheck':update_look();message=UPD['state']
+            elif action=='updrun':update_start();message='Actualizando: tarda unos minutos y el J1 se reinicia solo.'
+            elif action=='https':
+                https_set(f.get('on')=='1')
+                message='HTTPS activado: entra por https:// y acepta el aviso del navegador comparando la huella.' if f.get('on')=='1' else 'HTTPS desactivado.'
+            elif action=='notifytest':notify_test();message='Aviso de prueba enviado: debería llegarte en unos segundos.'
+            elif action=='notifytopic':notify_save(new_topic=True);message='Tema nuevo. Vuelve a suscribirte en la app.'
             elif action=='dns':
                 dns_settings(f.get('enabled')=='1',f.get('hostname',''),f.get('zone_id',''),f.get('token',''))
                 message='Cloudflare guardado.'
@@ -1273,7 +1382,7 @@ def ui_home():
     s.label('DNS: '+RUNTIME['ddns'],'g' if RUNTIME['ddns'].startswith('Actualizado') else 'm')
     s.label('Red config: apagada' if (STATE/'ap-off').exists() else readrun('ap-name')+' · '+readrun('ap-password'),'m')
     for a,t in (('wifi','Wi-Fi'),('ap','Red de configuración'),('vpn','WireGuard'),('dns','Cloudflare DNS'),('usb','Cable USB'),
-                ('speed','Velocidad'),('panel','Panel web'),('res','Recursos'),('bat','Batería'),('disp','Pantalla'),('tz','Zona horaria'),('logs:sys','Registros'),('sys','Sistema')):
+                ('speed','Velocidad'),('panel','Panel web'),('res','Recursos'),('bat','Batería'),('notify','Avisos'),('disp','Pantalla'),('tz','Zona horaria'),('logs:sys','Registros'),('sys','Sistema')):
         s.tile('nav:'+a,t,a.split(':')[0])
     return s.small(BRAND,'m').small(REPO,'m')
 
@@ -1349,13 +1458,16 @@ def ui_panel(arg):
         s.toggle('panel.lan:0' if c['lan'] else 'panel.lan:1','Acceso desde la red local',c['lan'])
         s.toggle('panel.vpn:0' if c['vpn'] else 'panel.vpn:1','Acceso desde la VPN',c['vpn'])
         s.label('Direcciones:')
-        s.small('Red del J1: http://192.168.78.1','g').small('USB: http://192.168.77.1','g')
+        s.small('Red del J1: '+('https' if c['https'] else 'http')+'://192.168.78.1','g').small('USB: '+('https' if c['https'] else 'http')+'://192.168.77.1','g')
+        s.toggle('panel.https:0' if c['https'] else 'panel.https:1','Cifrado HTTPS',c['https'])
+        sc='https' if c['https'] else 'http'
         if c['lan']:
             ips=lan_ips()
-            for ip in ips:s.small('Red local: http://'+ip,'g')
+            for ip in ips:s.small('Red local: '+sc+'://'+ip,'g')
             if not ips:s.small('Red local: sin IP (conecta la Wi-Fi o el cable)','y')
-            s.small('En la red local el panel va sin cifrar (HTTP): úsalo solo en casa y no abras el puerto 80 en el router.','y')
-        if c['vpn']:s.small('VPN: http://10.66.0.1 (cifrado por el túnel, desde cualquier sitio)','g')
+            if not c['https']:s.small('En la red local el panel va sin cifrar (HTTP): activa HTTPS o úsalo solo en casa, y no abras el puerto 80 en el router.','y')
+        if c['vpn']:s.small('VPN: '+sc+'://10.66.0.1 (cifrado por el túnel, desde cualquier sitio)','g')
+        if c['https']:s.small('El navegador avisará la primera vez (certificado propio del J1). Comprueba que la huella SHA-256 empieza por '+https_fingerprint()[:23],'m')
     else:s.small('Puerto 80 cerrado. La pantalla sigue funcionando; sin panel no se descargan los .conf ni se gestiona el SSH.','m')
     own=panel_own_password() is not None
     s.gap().label('Contraseña del panel (usuario admin):').small('Propia' if own else 'La misma clave de la red de configuración','g' if own else 'm')
@@ -1375,7 +1487,7 @@ def ui_vpn(arg):
     s.gap().label('Clientes: %d'%len(v['clients']))
     for c in v['clients']:
         p=peers.get(c['public_key'],{})
-        s.button('nav:client:'+c['id'],'%s · .%s · %s'%(c['name'],c['ip'],ago(p.get('handshake',0))),'i','user')
+        s.button('nav:client:'+c['id'],'%s · .%s · %s'%(c['name'],c['ip'],'en pausa' if c.get('paused') else ago(p.get('handshake',0))),'i','user')
     return s.field('name','Nombre del nuevo cliente').button('vpn.add','Crear cliente','p')
 
 def ui_client(cid):
@@ -1383,9 +1495,13 @@ def ui_client(cid):
     if c is None:raise ValueError('El cliente ya no existe')
     p=wg_peers().get(c['public_key'],{})
     s=Screen('client:'+cid,c['name'],'nav:vpn',10).label('IP en la VPN: 10.66.0.%s'%c['ip'])
-    s.label('Última conexión: '+ago(p.get('handshake',0)),'g' if p.get('handshake') and time.time()-p['handshake']<180 else 'm')
-    if p.get('endpoint','(none)')!='(none)':s.small('Desde '+p['endpoint'],'m')
-    s.small('Recibido %s · enviado %s'%(size_h(p.get('rx',0)),size_h(p.get('tx',0))),'m')
+    pa=c.get('paused')
+    if pa:s.label('En pausa: no puede conectarse','y')
+    else:
+        s.label('Última conexión: '+ago(p.get('handshake',0)),'g' if p.get('handshake') and time.time()-p['handshake']<180 else 'm')
+        if p.get('endpoint','(none)')!='(none)':s.small('Desde '+p['endpoint'],'m')
+        s.small('Recibido %s · enviado %s'%(size_h(p.get('rx',0)),size_h(p.get('tx',0))),'m')
+    s.toggle('vpn.pause:%s:%d'%(cid,0 if pa else 1),'Acceso a la VPN',not pa)
     s.button('nav:qr:'+cid,'Mostrar QR','p','qr')
     cf=load('cloudflare.json',{})
     if cf.get('enabled6') and cf.get('hostname6'):s.button('nav:qr6:'+cid,'QR por IPv6 (prueba)','i','qr')
@@ -1464,6 +1580,7 @@ def ui_sys(arg):
         s.label('RAM libre: %d / %d MB'%(mem.get('MemAvailable',mem.get('MemFree',0))//1024,mem['MemTotal']//1024))
     except (OSError,KeyError,ValueError):pass
     s.label('Kernel '+os.uname().release,'m').small(BRAND,'m').small(REPO,'m')
+    s.button('nav:update','Actualizar','i','update').small('Copia de seguridad: desde el panel web.','m')
     return s.button('nav:reboot','Reiniciar J1','d','power').button('nav:poweroff','Apagar J1','d','power')
 
 # speed test through whatever link has the route (cable or Wi-Fi), in the background
@@ -1581,6 +1698,10 @@ def ui_action(a, f):
     if verb=='vpn.save':vpn_settings(f.get('port','0'),f.get('endpoint',''));return 'vpn','Guardado. Vuelve a importar los perfiles.'
     if verb=='vpn.add':c=client_create(f.get('name',''));return 'client:'+c['id'],'Cliente creado. Pulsa Mostrar QR.'
     if verb=='vpn.del':client_delete(arg);return 'vpn','Cliente quitado'
+    if verb=='vpn.pause':
+        cid,_,on=arg.partition(':')
+        if on not in ('0','1'):raise ValueError('Opción no válida')
+        client_pause(cid,on=='1');return 'client:'+cid,'Cliente '+('en pausa' if on=='1' else 'reanudado')
     if verb in ('dns.on','dns.off','dns.save','dns6.on','dns6.off'):
         cf=load('cloudflare.json',{})
         if verb=='dns.save':dns_settings(bool(cf.get('enabled')),f.get('hostname',''),f.get('zone_id',''),f.get('token',''),None,f.get('hostname6',cf.get('hostname6','')))
@@ -1588,6 +1709,9 @@ def ui_action(a, f):
         else:dns_settings(verb=='dns.on',cf.get('hostname',''),cf.get('zone_id',''),'')
         return 'dns','Cloudflare guardado'
     if verb in ('panel.on','panel.off'):panel_set(enabled=verb=='panel.on');return 'panel','Panel web '+('activado' if verb=='panel.on' else 'desactivado')
+    if verb=='panel.https':
+        if arg not in ('0','1'):raise ValueError('Opción no válida')
+        https_set(arg=='1');return 'panel','HTTPS '+('activado' if arg=='1' else 'desactivado')
     if verb=='panel.pw':panel_password_set(f.get('pw',''),f.get('pw2',''));return 'panel','Contraseña del panel cambiada'
     if verb=='panel.pwreset':panel_password_reset();return 'panel','El panel vuelve a usar la clave de la red'
     if verb in ('panel.lan','panel.vpn'):
@@ -1600,6 +1724,15 @@ def ui_action(a, f):
         if t not in dict(DISPLAY_TIMES):raise ValueError('Tiempo no válido')
         display_save(timeout=t);return 'disp','Guardado: '+dict(DISPLAY_TIMES)[t]
     if verb=='speed.run':speed_start();return 'speed',None
+    if verb=='update.check':update_look();return 'update',None
+    if verb=='update.run':update_start();return 'update',None
+    if verb in ('notify.on','notify.off'):notify_save(enabled=verb=='notify.on');return 'notify','Avisos '+('activados' if verb=='notify.on' else 'desactivados')
+    if verb=='notify.test':notify_test();return 'notify','Aviso de prueba enviado'
+    if verb=='notify.topic':notify_save(new_topic=True);return 'notify','Tema nuevo: vuelve a suscribirte'
+    if verb=='notify.ev':
+        k,_,on=arg.partition(':');ev=notify_conf()['events']
+        if k not in dict(NOTIFY_EVENTS) or on not in ('0','1'):raise ValueError('Opción no válida')
+        notify_save(events=[e for e in ev if e!=k]+([k] if on=='1' else []));return 'notify',None
     if verb=='bat.limit':
         v=int(arg) if arg.isdigit() else -1
         bat_limit_save(v);return 'bat','Carga limitada al %d%%'%v if v else 'Sin límite de carga'
@@ -1742,6 +1875,309 @@ def upnp_sync():
     except ValueError:pass
     RUNTIME['upnp']='Abierto UDP %s → %s%s'%(port,local,note)
 
+# ---- notifications to the phone through an ntfy server (ntfy.sh or your own) on
+# a secret topic: whoever knows the topic reads them, so the text carries no IPs,
+# keys or passwords, only what happened. Sent in the background, never blocking.
+NOTIFY_EVENTS=(('power','Corriente: se va o vuelve (cargador) y encendido'),('bat','Batería baja o caliente'),
+               ('vpn','La VPN falla o vuelve a funcionar'),('ip','Cambia la IP pública de casa'),('client','Se conecta un cliente de la VPN'))
+NOTIFY_SERVER='https://ntfy.sh'
+def notify_conf():
+    c=load('notify.json',{})
+    if not isinstance(c.get('topic'),str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,64}',c['topic']):
+        c['topic']='j1-'+secrets.token_hex(10);save('notify.json',c)
+    c.setdefault('server',NOTIFY_SERVER);c.setdefault('events',[k for k,_ in NOTIFY_EVENTS]);c['enabled']=c.get('enabled') is True
+    return c
+def notify_save(enabled=None, server=None, events=None, new_topic=False):
+    c=notify_conf()
+    if enabled is not None:c['enabled']=bool(enabled)
+    if server is not None:
+        server=server.strip().rstrip('/') or NOTIFY_SERVER;u=urllib.parse.urlsplit(server)
+        if u.scheme!='https' or not u.hostname or u.query or u.fragment:raise ValueError('El servidor de avisos debe empezar por https://')
+        c['server']=server
+    if events is not None:c['events']=[k for k,_ in NOTIFY_EVENTS if k in events]
+    if new_topic:c['topic']='j1-'+secrets.token_hex(10)
+    save('notify.json',c);log('Avisos: '+('activados' if c['enabled'] else 'desactivados'))
+def notify_url(c=None):
+    c=c or notify_conf();return c['server']+'/'+c['topic']
+def notify_send(title, text, tags=(), prio=3):
+    c=notify_conf()
+    body=json.dumps({'topic':c['topic'],'title':title,'message':text,'tags':list(tags),'priority':prio}).encode()
+    req=urllib.request.Request(c['server'],data=body,method='POST',headers={'Content-Type':'application/json','User-Agent':'j1-open-vpn'})
+    with urllib.request.urlopen(req,timeout=15) as r:r.read(4096)
+def notify(kind, title, text, tags=(), prio=3):
+    c=notify_conf()
+    if not c['enabled'] or kind not in c['events']:return False
+    def run():
+        try:notify_send(title,text,tags,prio)
+        except Exception as e:log('Aviso no enviado: '+type(e).__name__)
+    threading.Thread(target=run,daemon=True).start();return True
+# what the last look saw (the worker looks once a minute); None = not known yet
+WATCH={'power':None,'low':False,'hot':False,'vpn_err':None,'clients':None,'boot':None}
+def notify_watch():
+    b=bat_read()
+    if b:
+        plugged=b['status']!='Discharging'   # Paused: the cable is plugged, the limit stops the charge
+        if WATCH['power'] is not None and plugged!=WATCH['power']:
+            if plugged:notify('power','J1: vuelve la corriente','El cargador vuelve a dar corriente. Batería al %d%%.'%b['cap'],('electric_plug',))
+            else:notify('power','J1: sin corriente','Se ha desconectado el cargador o se ha ido la luz. El J1 sigue con la batería (%d%%).'%b['cap'],('warning',),4)
+        WATCH['power']=plugged
+        if not plugged and b['cap']<=20 and not WATCH['low']:
+            WATCH['low']=True;notify('bat','J1: batería baja','Queda un %d%%. Conecta el cargador o el J1 se apagará.'%b['cap'],('battery',),5)
+        elif plugged or b['cap']>=25:WATCH['low']=False
+        if b['temp']>=45 and not WATCH['hot']:
+            WATCH['hot']=True;notify('bat','J1: batería caliente','La batería está a %.0f °C. Ponlo en un sitio más fresco.'%b['temp'],('fire',),4)
+        elif b['temp']<40:WATCH['hot']=False
+    err=RUNTIME['vpn'].startswith('Error')
+    if WATCH['vpn_err'] is not None and err!=WATCH['vpn_err']:
+        if err:notify('vpn','J1: la VPN no funciona','WireGuard ha dado un error. Mira Registros en el J1.',('x',),4)
+        else:notify('vpn','J1: la VPN vuelve a funcionar','WireGuard funciona de nuevo.',('white_check_mark',))
+    if not RUNTIME['vpn'].startswith('Iniciando'):WATCH['vpn_err']=err
+    peers=wg_peers();now=time.time();on={}
+    for c in ensure_vpn_state()['clients']:
+        hs=peers.get(c['public_key'],{}).get('handshake',0)
+        on[c['id']]=bool(hs) and now-hs<300 and not c.get('paused')
+        if WATCH['clients'] is not None and on[c['id']] and not WATCH['clients'].get(c['id']):
+            notify('client','J1: '+c['name']+' conectado','Se ha conectado a la VPN.',('closed_lock_with_key',),2)
+    WATCH['clients']=on
+    if WATCH['boot'] and has_uplink():
+        WATCH['boot']=False;notify('power','J1: encendido','El J1 se ha encendido o reiniciado y ya tiene Internet.',('arrows_counterclockwise',))
+def notify_ip(public):
+    # public IPv4 of home, from the DNS update; only a change is told
+    if RUNTIME.get('ip4') and RUNTIME['ip4']!=public:
+        notify('ip','J1: nueva IP pública','Tu conexión de casa tiene otra IP pública. El DNS de Cloudflare ya se ha actualizado.',('globe_with_meridians',))
+    RUNTIME['ip4']=public
+def ui_notify(arg):
+    c=notify_conf();s=Screen('notify','Avisos al móvil',refresh=10)
+    s.toggle('notify.off' if c['enabled'] else 'notify.on','Avisos',c['enabled'])
+    s.small('Llegan a la app ntfy (o al navegador) suscrita a tu tema secreto. Escanea el QR con el móvil para suscribirte.','m')
+    s.add('Q',','.join(qr_rows(notify_url(c))))
+    s.small(notify_url(c),'m')
+    if c['enabled']:s.button('notify.test','Enviar aviso de prueba','p','notify')
+    s.gap().label('Avisar cuando:')
+    for k,n in NOTIFY_EVENTS:
+        on=k in c['events'];s.toggle('notify.ev:%s:%d'%(k,0 if on else 1),n,on)
+    s.gap().button('notify.topic','Cambiar el tema secreto','i')
+    return s.small('Cambiar el tema deja de enviar avisos al anterior: vuelve a suscribirte. Los avisos no llevan IPs ni claves.','m')
+def notify_section():
+    c=notify_conf()
+    return ('<section id=avisos><h2>Avisos al móvil</h2><p>'+('Activados.' if c['enabled'] else 'Desactivados.')+' Tema secreto: <code>'+esc(notify_url(c))+'</code></p>'
+        '<p class=muted>Instala la app ntfy en el móvil y suscríbete a esa dirección (o ábrela en el navegador). Quien conozca el tema puede leer los avisos: por eso no llevan IPs, claves ni contraseñas.</p>'
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=notify>'
+        '<label><input type=checkbox name=enabled value=1'+(' checked' if c['enabled'] else '')+'> Enviar avisos</label>'+
+        ''.join('<label><input type=checkbox name=ev_'+k+' value=1'+(' checked' if k in c['events'] else '')+'> '+esc(n)+'</label>' for k,n in NOTIFY_EVENTS)+
+        '<label>Servidor<input name=server value="'+esc(c['server'])+'" placeholder="'+NOTIFY_SERVER+'"></label>'
+        '<small>Por defecto el servidor público ntfy.sh; puedes poner el tuyo.</small><br><button>Guardar avisos</button></form>'
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=notifytest><button class=sec>Enviar aviso de prueba</button></form>'
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=notifytopic><button class=sec>Cambiar el tema secreto</button><small>El tema anterior deja de recibir avisos: vuelve a suscribirte.</small></form></section>')
+def notify_test():
+    if not notify_conf()['enabled']:raise ValueError('Activa primero los avisos')
+    try:notify_send('J1: aviso de prueba','Si lees esto, los avisos del J1 funcionan.',('wave',))
+    except (OSError,ValueError) as e:raise RuntimeError('No se pudo enviar: '+type(e).__name__)
+
+# ---- backup of the configuration: /etc/j1 and the SSH host keys in a tar,
+# encrypted with a password (scrypt + AES-256-GCM from the system's libcrypto,
+# the one Python's ssl module already loads). Files of this phone stay out.
+DROPBEAR=Path(os.environ.get('J1_DROPBEAR','/etc/dropbear'))
+BACKUP_SKIP={'random-seed','hostapd.entropy','mac.info'}
+BACKUP_MAGIC=b'J1-OPEN-VPN-BACKUP-1\n'
+BACKUP_MAX=1<<20
+BACKUP_NAME=re.compile(r'(config|dropbear)/[A-Za-z0-9._-]{1,64}')
+def libcrypto():
+    for n in ('libcrypto.so.3',ctypes.util.find_library('crypto'),'libcrypto-3-x64.dll','libcrypto-3.dll'):
+        if not n:continue
+        try:return ctypes.CDLL(n)
+        except OSError:pass
+    raise RuntimeError('Falta libcrypto para cifrar')
+def aes_gcm(key, nonce, aad, data, tag=None):
+    # tag None: encrypts, returns ciphertext + 16-byte tag; else decrypts and checks the tag
+    c=libcrypto();vp=ctypes.c_void_p;cp=ctypes.c_char_p;ip=ctypes.POINTER(ctypes.c_int)
+    c.EVP_CIPHER_CTX_new.restype=vp;c.EVP_aes_256_gcm.restype=vp;c.EVP_CIPHER_CTX_free.argtypes=[vp]
+    enc=tag is None
+    init,upd,fin=((c.EVP_EncryptInit_ex,c.EVP_EncryptUpdate,c.EVP_EncryptFinal_ex) if enc else (c.EVP_DecryptInit_ex,c.EVP_DecryptUpdate,c.EVP_DecryptFinal_ex))
+    init.argtypes=[vp,vp,vp,cp,cp];upd.argtypes=[vp,cp,ip,cp,ctypes.c_int];fin.argtypes=[vp,cp,ip];c.EVP_CIPHER_CTX_ctrl.argtypes=[vp,ctypes.c_int,ctypes.c_int,vp]
+    ctx=c.EVP_CIPHER_CTX_new();n=ctypes.c_int(0);out=ctypes.create_string_buffer(len(data)+32);tb=ctypes.create_string_buffer(tag or 16)
+    try:
+        ok=init(ctx,c.EVP_aes_256_gcm(),None,key,nonce)==1 and upd(ctx,None,ctypes.byref(n),aad,len(aad))==1 and upd(ctx,out,ctypes.byref(n),data,len(data))==1
+        size=n.value
+        if not enc:ok=ok and c.EVP_CIPHER_CTX_ctrl(ctx,0x11,16,tb)==1   # EVP_CTRL_GCM_SET_TAG
+        ok=ok and fin(ctx,ctypes.cast(ctypes.addressof(out)+size,cp),ctypes.byref(n))==1
+        if enc:ok=ok and c.EVP_CIPHER_CTX_ctrl(ctx,0x10,16,tb)==1     # EVP_CTRL_GCM_GET_TAG
+    finally:c.EVP_CIPHER_CTX_free(ctx)
+    if not ok:raise ValueError('Contraseña incorrecta o copia dañada')
+    return out.raw[:size]+(tb.raw[:16] if enc else b'')
+def backup_key(pw, salt):return hashlib.scrypt(pw.encode(),salt=salt,n=1<<15,r=8,p=1,maxmem=64<<20,dklen=32)
+def backup_files():
+    out=[]
+    for prefix,d in (('config',STATE),('dropbear',DROPBEAR)):
+        if d.is_dir():
+            for f in sorted(d.iterdir()):
+                if f.is_file() and not f.is_symlink() and f.name not in BACKUP_SKIP and BACKUP_NAME.fullmatch(prefix+'/'+f.name):out.append((prefix+'/'+f.name,f))
+    return out
+def backup_make(pw, again):
+    if len(pw)<8:raise ValueError('La contraseña de la copia debe tener al menos 8 caracteres')
+    if pw!=again:raise ValueError('Las dos contraseñas no coinciden')
+    buf=io.BytesIO()
+    with tarfile.open(fileobj=buf,mode='w:gz') as t:
+        for name,f in backup_files():
+            data=f.read_bytes();i=tarfile.TarInfo(name);i.size=len(data);i.mode=0o600;i.mtime=int(f.stat().st_mtime)
+            t.addfile(i,io.BytesIO(data))
+    salt=secrets.token_bytes(16);nonce=secrets.token_bytes(12);head=BACKUP_MAGIC+salt+nonce
+    log('Copia de seguridad descargada');return head+aes_gcm(backup_key(pw,salt),nonce,head,buf.getvalue())
+def backup_open(blob, pw):
+    # -> [(name, bytes)], checked: only plain files of config/ and dropbear/
+    n=len(BACKUP_MAGIC)
+    if len(blob)<n+28+16 or not blob.startswith(BACKUP_MAGIC):raise ValueError('Ese archivo no es una copia del J1')
+    head=blob[:n+28];salt,nonce=blob[n:n+16],blob[n+16:n+28]
+    plain=aes_gcm(backup_key(pw,salt),nonce,head,blob[n+28:-16],blob[-16:])
+    files=[]
+    with tarfile.open(fileobj=io.BytesIO(plain),mode='r:gz') as t:
+        for m in t.getmembers():
+            if not m.isfile() or not BACKUP_NAME.fullmatch(m.name) or m.size>BACKUP_MAX:raise ValueError('La copia contiene algo inesperado: no se restaura')
+            if m.name.split('/')[1] in BACKUP_SKIP:continue
+            files.append((m.name,t.extractfile(m).read()))
+    if not any(n=='config/vpn.json' for n,_ in files):raise ValueError('La copia no tiene la configuración de la VPN')
+    return files
+def write_bytes(path, data, mode=0o600):
+    tmp=path.with_name(path.name+'.new');fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,mode)
+    with os.fdopen(fd,'wb') as f:f.write(data);f.flush();os.fsync(f.fileno())
+    os.replace(tmp,path)
+def backup_restore(blob, pw):
+    files=backup_open(blob,pw)
+    with LOCK:
+        for name,data in files:
+            prefix,fn=name.split('/');write_bytes((STATE if prefix=='config' else DROPBEAR)/fn,data)
+    log('Copia de seguridad restaurada (%d archivos): reiniciando'%len(files))
+    reboot_soon()
+    return len(files)
+def reboot_soon():
+    subprocess.Popen(['/bin/busybox','sh','-c','sleep 3; sync; reboot -f'],start_new_session=True)
+def backup_section():
+    return ('<section id=copia><h2>Copia de seguridad</h2><p class=muted>Guarda la configuración (clientes de la VPN, Wi-Fi, Cloudflare, avisos, contraseñas y claves SSH) en un archivo cifrado con una contraseña. Sirve para reinstalar o pasar a otro J1 sin volver a configurar los clientes.</p>'
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=backup>'
+        '<label>Contraseña de la copia (mínimo 8 caracteres)<input type=password name=pw autocomplete=new-password minlength=8 required></label><label>Repítela<input type=password name=pw2 autocomplete=new-password required></label>'
+        '<small>Sin esta contraseña la copia no se puede abrir: apúntala. Guarda el archivo en un sitio seguro, contiene las claves de la VPN.</small><br><button>Descargar copia</button></form>'
+        '<h3>Restaurar</h3><form method=post enctype=multipart/form-data>'+hidden()+'<input type=hidden name=action value=restore>'
+        '<label>Archivo de la copia<input type=file name=file accept=".j1bak" required></label><label>Contraseña de la copia<input type=password name=pw autocomplete=off required></label>'
+        '<small>Sustituye la configuración actual por la de la copia y reinicia el J1 (un minuto sin VPN).</small><br><button class=danger>Restaurar y reiniciar</button></form></section>')
+
+# ---- updates from GitHub: the system (rootfs) of the latest release, checked with
+# its SHA256SUMS, unpacked next to the running one and swapped in for the next
+# boot; the old one stays as <root>.old. /etc/j1 and /etc/dropbear are not in
+# it (own folders), and /var/lib/j1 (camera tables) is copied over. The boot
+# image is not touched: if the release brings another kernel, the screen says so.
+UPD_REPO='Farwebsite/j1-open-vpn'
+UPD={'state':'','busy':False,'latest':None}
+RELEASE_FILE=Path('/usr/share/j1/release')
+KEEP_DIRS=('var/lib/j1',)
+def release_current():
+    try:m=re.search(r'j1-open-vpn (\d+\.\d+\.\d+)',RELEASE_FILE.read_text())
+    except OSError:m=None
+    return m[1] if m else ''
+def vtuple(v):return tuple(int(x) for x in re.findall(r'\d+',v)[:3]) if v else (0,)
+def http_get(url, limit, dest=None):
+    req=urllib.request.Request(url,headers={'User-Agent':'j1-open-vpn','Accept':'application/octet-stream' if dest else 'application/vnd.github+json'})
+    h=hashlib.sha256();n=0
+    with urllib.request.urlopen(req,timeout=30) as r,(open(dest,'wb') if dest else io.BytesIO()) as f:
+        while True:
+            b=r.read(65536)
+            if not b:break
+            n+=len(b)
+            if n>limit:raise RuntimeError('Descarga demasiado grande')
+            h.update(b);f.write(b)
+        data=None if dest else f.getvalue()
+    return data,h.hexdigest()
+def update_check():
+    raw,_=http_get('https://api.github.com/repos/%s/releases/latest'%UPD_REPO,1<<20)
+    j=json.loads(raw);assets={a['name']:a['browser_download_url'] for a in j.get('assets',[])}
+    v=str(j.get('tag_name','')).lstrip('v')
+    if not re.fullmatch(r'\d+\.\d+\.\d+',v) or 'j1-open-vpn-rootfs.tar.gz' not in assets or 'SHA256SUMS' not in assets:raise RuntimeError('La última versión de GitHub no trae el sistema')
+    UPD['latest']={'version':v,'assets':assets};return UPD['latest']
+def boot_kernel(blob):
+    # kernel of an Android boot image (header v0), to compare by content
+    if blob[:8]!=b'ANDROID!':return None
+    k,_,_,_,_,_,_,page=struct.unpack_from('<8I',blob,8)
+    return hashlib.sha256(blob[page:page+k]).hexdigest() if 0<k<len(blob) and page in (2048,4096) else None
+def part_dev(name):
+    for d in Path('/sys/class/block').glob('mmcblk0p*'):
+        try:
+            if 'PARTNAME='+name in (d/'uevent').read_text().split():return '/dev/'+d.name
+        except OSError:pass
+    return ''
+def kernel_same(latest):
+    # True / False, None if it cannot be told
+    dev=part_dev('KERNEL')
+    if not dev or 'j1-open-vpn-boot.img' not in latest['assets']:return None
+    try:
+        with open(dev,'rb') as f:mine=boot_kernel(f.read(16<<20))
+        new,_=http_get(latest['assets']['j1-open-vpn-boot.img'],17<<20)
+    except (OSError,RuntimeError):return None
+    return mine is not None and mine==boot_kernel(new)
+def root_paths():
+    # (userdata partition, folder of / inside it) from /proc/self/mountinfo
+    for line in Path('/proc/self/mountinfo').read_text().splitlines():
+        f=line.split()
+        if f[4]=='/' and f[3]!='/':
+            src=f[f.index('-')+2]
+            if src.startswith('/dev/'):return src,f[3].replace('\\040',' ')
+    raise RuntimeError('No se sabe dónde está instalado el sistema')
+def update_run():
+    try:
+        latest=UPD['latest'] or update_check();v=latest['version']
+        UPD['state']='Descargando la versión %s...'%v
+        sums,_=http_get(latest['assets']['SHA256SUMS'],65536)
+        want=dict(reversed(l.split()) for l in sums.decode().splitlines() if len(l.split())==2).get('j1-open-vpn-rootfs.tar.gz')
+        dev,root=root_paths();mnt=Path('/run/j1-data');mnt.mkdir(exist_ok=True)
+        if subprocess.run(['mount','-t','ext4','-o','nosuid,nodev,noatime',dev,str(mnt)],capture_output=True,timeout=30).returncode:raise RuntimeError('No se pudo abrir la partición de datos')
+        try:
+            base=mnt/root.lstrip('/');new=base.with_name(base.name+'.new');old=base.with_name(base.name+'.old');tgz=base.with_name('update.tar.gz')
+            if not (base/'sbin/j1-init').exists():raise RuntimeError('No se encuentra el sistema instalado')
+            _,got=http_get(latest['assets']['j1-open-vpn-rootfs.tar.gz'],100<<20,tgz)
+            if not want or got!=want:raise RuntimeError('La descarga no coincide con SHA256SUMS: no se instala')
+            UPD['state']='Descomprimiendo (unos minutos)...'
+            subprocess.run(['rm','-rf',str(new)],timeout=300);new.mkdir()
+            if subprocess.run(['tar','-xzf',str(tgz),'-C',str(new)],capture_output=True,timeout=1800).returncode:raise RuntimeError('No se pudo descomprimir el sistema')
+            if not (new/'usr/share/j1/release').is_file() or not (new/'sbin/j1-init').is_file():raise RuntimeError('El sistema descargado está incompleto')
+            for d in KEEP_DIRS:
+                if (base/d).is_dir():
+                    (new/d).parent.mkdir(parents=True,exist_ok=True);subprocess.run(['cp','-a',str(base/d),str((new/d).parent)],timeout=120)
+            UPD['state']='Instalando...'
+            subprocess.run(['rm','-rf',str(old)],timeout=600);tgz.unlink()
+            os.sync();os.rename(base,old);os.rename(new,base);os.sync()
+        finally:subprocess.run(['umount',str(mnt)],capture_output=True,timeout=30)
+        UPD['state']='Versión %s instalada: reiniciando...'%v;log('Actualizado a la versión %s: reiniciando'%v)
+        reboot_soon()
+    except Exception as e:
+        UPD['state']='Error: '+str(e)[:120];log('Actualización: '+type(e).__name__+': '+str(e)[:200])
+    finally:UPD['busy']=False
+def update_start():
+    with LOCK:
+        if UPD['busy']:raise ValueError('Ya se está actualizando')
+        if not UPD['latest'] or vtuple(UPD['latest']['version'])<=vtuple(release_current()):raise ValueError('Comprueba antes si hay una versión nueva')
+        UPD['busy']=True;UPD['state']='Empezando...'
+    threading.Thread(target=update_run,daemon=True).start()
+def update_look():
+    # check button: fills UPD and says what there is
+    latest=update_check();cur=release_current()
+    if vtuple(latest['version'])<=vtuple(cur):UPD['state']='Tienes la última versión (%s).'%cur;return
+    same=kernel_same(latest)
+    UPD['state']='Hay una versión nueva: %s.'%latest['version']+('' if same is not False else ' Trae otro kernel: el sistema se actualiza aquí; el kernel, solo reinstalando la imagen de arranque.')
+def ui_update(arg):
+    s=Screen('update','Actualizar','nav:sys',refresh=3 if UPD['busy'] else 0)
+    s.label('Versión instalada: '+(release_current() or 'de desarrollo'))
+    if UPD['state']:s.label(UPD['state'],'r' if UPD['state'].startswith('Error') else 'g' if 'nueva' in UPD['state'] or 'instalada' in UPD['state'] else 'm')
+    if UPD['busy']:return s.small('No apagues el J1. Al terminar se reinicia solo.','y')
+    s.button('update.check','Buscar actualizaciones','p','update')
+    if UPD['latest'] and vtuple(UPD['latest']['version'])>vtuple(release_current()):s.button('update.run','Instalar la %s y reiniciar'%UPD['latest']['version'],'d','update')
+    return s.small('Descarga el sistema de GitHub, comprueba su suma SHA-256 y lo instala junto al actual: la configuración se conserva. Un minuto sin VPN al reiniciar.','m')
+def update_section():
+    cur=release_current();new=UPD['latest'] and vtuple(UPD['latest']['version'])>vtuple(cur)
+    return ('<section id=actualizar><h2>Actualizar</h2><p>Versión instalada: <b>'+esc(cur or 'de desarrollo')+'</b>'+('<br>'+esc(UPD['state']) if UPD['state'] else '')+'</p>'+
+        ('' if UPD['busy'] else '<form method=post>'+hidden()+'<input type=hidden name=action value=updcheck><button class=sec>Buscar actualizaciones</button></form>'+
+        ('<form method=post>'+hidden()+'<input type=hidden name=action value=updrun><button class=danger>Instalar la '+esc(UPD['latest']['version'])+' y reiniciar</button></form>' if new else ''))+
+        '<p class=muted>Descarga el sistema de la última versión de GitHub, comprueba su suma SHA-256 y lo instala junto al actual. La configuración se conserva y el sistema anterior queda guardado. Un minuto sin VPN al reiniciar.</p></section>')
+
+UI_SCREENS.update(notify=ui_notify,update=ui_update)   # defined after the table
+
 def has_uplink():
     try:return bool(command(['ip','-4','route','show','default']))
     except (RuntimeError,OSError,subprocess.SubprocessError):return False
@@ -1749,7 +2185,11 @@ def has_uplink():
 def worker():
     next_dns=0;next_vpn=0;next_upnp=0;next_bat=0
     while True:
-        if time.monotonic()>=next_bat:bat_limit_apply();bat_sample();next_bat=time.monotonic()+60
+        if time.monotonic()>=next_bat:
+            bat_limit_apply();bat_sample()
+            try:notify_watch()
+            except Exception as e:log('Avisos: error '+type(e).__name__)
+            next_bat=time.monotonic()+60
         if (time.monotonic()>=next_upnp or (RUN/'upnp-request').exists()) and has_uplink():
             (RUN/'upnp-request').unlink(missing_ok=True)
             try:upnp_sync();next_upnp=time.monotonic()+1800
@@ -1780,7 +2220,10 @@ def worker():
 def main():
     os.umask(0o077);STATE.mkdir(parents=True,exist_ok=True);RUN.mkdir(parents=True,exist_ok=True)
     pin_fail_load()
-    ensure_vpn_state();apply_usb();threading.Thread(target=worker,daemon=True).start()
+    ensure_vpn_state();apply_usb()
+    try:WATCH['boot']=float(Path('/proc/uptime').read_text().split()[0])<600   # booted now, not restarted
+    except (OSError,ValueError):pass
+    threading.Thread(target=worker,daemon=True).start()
     threading.Thread(target=ui_serve,daemon=True).start()
     threading.Thread(target=panel_serve,daemon=True).start()
     log('Web Wi-Fi / WireGuard disponible')

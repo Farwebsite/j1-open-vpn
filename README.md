@@ -17,7 +17,11 @@ El Galaxy J1 de 2015 (2 núcleos a 1,2 GHz, 512 MB de RAM) no sirve ya como móv
 - **Servidor VPN WireGuard** dentro del kernel (cifrado optimizado para ARM), para conectarte a tu casa desde fuera de forma segura.
 - **Pantalla táctil de control:** estado, Wi-Fi, clientes VPN con **código QR** para importarlos en la app de WireGuard, registros, recursos, batería (tiempo restante sin cargador), brillo, apagado…
 - **Conectar a una Wi-Fi leyendo su código QR** con la cámara trasera o la delantera del J1, sin escribir la contraseña: cámara a pantalla completa con enfoque automático, brillo automático o manual, medición, contraste y nitidez (la cámara solo se enciende mientras busca el código).
-- **Panel web** (opcional) desde el propio Wi-Fi del J1 o por USB.
+- **Panel web** (opcional) desde el propio Wi-Fi del J1 o por USB, con **HTTPS** opcional.
+- **Avisos al móvil** (ntfy): corte de corriente, batería baja, errores de la VPN, cambio de IP pública, clientes que se conectan.
+- **Copia de seguridad cifrada** de la configuración y restauración desde el panel.
+- **Actualizaciones desde GitHub** con comprobación SHA-256, sin reinstalar.
+- **Clientes en pausa** sin borrarlos, con su última conexión y tráfico.
 - **Cable de red por USB (OTG):** con un adaptador USB‑Ethernet el J1 lo alimenta solo; el cable tiene prioridad y el **Wi-Fi queda de reserva** con la misma IP (un solo puerto abierto en el router).
 - **Apertura automática del puerto** en el router (UPnP) y **DNS dinámico** con Cloudflare (opcional).
 - **Red Wi-Fi propia de configuración** (`DIRECT-J1-VPN-XXXX`) para configurarlo sin cables.

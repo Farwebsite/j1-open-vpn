@@ -13,7 +13,12 @@ RAM prices are sky-high, so even a small home server costs more and more. Meanwh
 - WireGuard **in the kernel** (ARM/NEON crypto); clients created on the phone screen and imported with a **QR code**.
 - Joins a Wi-Fi network by **reading its QR code with the J1's rear or front camera**: no typing the password. Full screen camera with autofocus, automatic or manual brightness, metering, contrast and sharpness.
 - Touchscreen UI (C, framebuffer, antialiased Inter font, colored icons, tile home screen, zero CPU when the screen is off): status, Wi-Fi, VPN clients, logs, resources, battery (time left without the charger), brightness, lock screen (slide to unlock, optional PIN, can be turned off), speed test, power menu.
-- Optional web panel over the phone's own Wi-Fi network or USB.
+- Optional web panel over the phone's own Wi-Fi network or USB, with optional HTTPS.
+- **Phone notifications** (ntfy): power cut, low battery, VPN errors, public IP change, clients connecting.
+- **Encrypted backup** of the configuration and restore from the web panel.
+- **Updates from GitHub** checked with SHA-256, no reinstall.
+- **Paused VPN clients** without deleting them, with their last connection and traffic.
+- **Battery:** real use in mA/W, time left and a charge limit (50-95 %).
 - **USB Ethernet via OTG** (RTL8153 tested): the phone powers the adapter; cable first, **Wi-Fi as standby on the same IP** (single port forward).
 - Automatic port forwarding (UPnP) and Cloudflare dynamic DNS (optional).
 - Measured: ~57 Mbit/s down / ~43 up over cable; ~30 over Wi-Fi (2.4 GHz).

@@ -25,6 +25,7 @@ ICONS = (('wifi', 'wifi'), ('ap', 'wifi_tethering'), ('vpn', 'verified_user'), (
          ('usb', 'settings_ethernet'), ('res', 'insights'), ('bat', 'battery_full'), ('disp', 'light_mode'), ('logs', 'article'),
          ('sys', 'settings'), ('qr', 'qr_code_2'), ('ip', 'lan'), ('user', 'person'),
          ('power', 'power_settings_new'), ('speed', 'speed'), ('tz', 'schedule'), ('lock', 'lock'), ('panel', 'language'), ('cam', 'photo_camera'), ('camswitch', 'flip_camera_android'), ('camtune', 'tune'),
+         ('notify', 'notifications'), ('update', 'system_update'),
          ('more', 'chevron_right'), ('back', 'arrow_back_ios_new'))
 ICON_SIZES = (30, 46)
 
@@ -78,7 +79,8 @@ icons(out)
 # the web panel uses the same icons, as inline SVG paths in web.py (between markers)
 WEB_ICONS = (('wifi', 'wifi'), ('cable', 'settings_ethernet'), ('vpn', 'verified_user'), ('dns', 'cloud'),
              ('key', 'key'), ('ap', 'wifi_tethering'), ('lock', 'lock'), ('tz', 'schedule'), ('ssh', 'terminal'), ('bat', 'battery_full'),
-             ('download', 'download'), ('user', 'person'))
+             ('download', 'download'), ('user', 'person'), ('notify', 'notifications'), ('backup', 'backup'),
+             ('update', 'system_update'), ('https', 'https'))
 def web_icons():
     from fontTools.pens.svgPathPen import SVGPathPen
     f = TTFont(str(FONTS / 'MaterialIcons-Regular.ttf'))

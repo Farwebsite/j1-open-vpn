@@ -66,10 +66,14 @@ printf 'WG: iniciando\n' >/run/vpn-summary
 # J1_UI_DEBUG: one line per tap/action in /run/display.log (taps only, cheap)
 (while :; do J1_UI_DEBUG=1 /usr/local/bin/j1-display; sleep 2; done) >>/run/display.log 2>&1 </dev/null &
 # web.py right away (it retries until the network addresses exist): the screen gets its content in ~2 s
-/usr/bin/python3 /usr/local/lib/j1/web.py >/run/web.log 2>&1 </dev/null &
-echo $! >/run/web.pid
-# web.py pauses the charger at the charge limit: if web.py is gone, charging comes back
-(while sleep 300; do pgrep -f "python3 /usr/local/lib/j1/w[e]b" >/dev/null || echo 0 >/sys/class/power_supply/battery/batt_slate_mode; done) >/dev/null 2>&1 </dev/null &
+# Started again if it stops (with the time zone saved now). Meanwhile charging
+# comes back on: web.py pauses the charger at the charge limit.
+(while :; do
+  TZ="$(cat /etc/j1/tz 2>/dev/null || echo CET-1CEST,M3.5.0,M10.5.0/3)" /usr/bin/python3 /usr/local/lib/j1/web.py >>/run/web.log 2>&1 </dev/null
+  echo 0 >/sys/class/power_supply/battery/batt_slate_mode
+  log 'Panel web detenido: se vuelve a iniciar'
+  sleep 3
+ done) &
 USB=/sys/class/android_usb/android0
 if [ -d "$USB" ]; then
  echo 0 >"$USB/enable"

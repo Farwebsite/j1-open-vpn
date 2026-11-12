@@ -1,0 +1,18 @@
+name: Pruebas
+# The web.py tests on every push and pull request (the J1 is not needed: they
+# use temporary folders and fake system files). The screen is compiled too.
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: web.py
+        run: python3 tests/test_j1_web.py
+      - name: Pantalla (j1-display)
+        run: cc -Os -Wall -Wextra -Werror -o /tmp/j1-display rootfs/display/j1-display.c -lm
