@@ -18,7 +18,7 @@ El Galaxy J1 de 2015 (2 núcleos a 1,2 GHz, 512 MB de RAM) no sirve ya como móv
 - **Pantalla táctil de control:** estado, Wi-Fi, clientes VPN con **código QR** para importarlos en la app de WireGuard, registros, recursos, batería (tiempo restante sin cargador), brillo, apagado…
 - **Conectar a una Wi-Fi leyendo su código QR** con la cámara trasera o la delantera del J1, sin escribir la contraseña: cámara a pantalla completa con enfoque automático, brillo automático o manual, medición, contraste y nitidez (la cámara solo se enciende mientras busca el código).
 - **Panel web** (opcional) desde el propio Wi-Fi del J1 o por USB, con **HTTPS** opcional.
-- **Avisos al móvil** (ntfy): corte de corriente, batería baja, errores de la VPN, cambio de IP pública, clientes que se conectan.
+- **Avisos al móvil** (ntfy): corte de corriente, batería baja, errores de la VPN, cambio de IP pública, clientes que se conectan. Con ntfy.sh o con [tu propio servidor cerrado](docs/ntfy-propio.md) (token: nadie más publica ni lee).
 - **Copia de seguridad cifrada** de la configuración y restauración desde el panel.
 - **Actualizaciones desde GitHub** con comprobación SHA-256, sin reinstalar.
 - **Clientes en pausa** sin borrarlos, con su última conexión y tráfico.
@@ -65,6 +65,7 @@ Android deja de arrancar (tus datos de Android no se borran). Se puede volver a 
 
 - [Instalación](docs/instalacion.md)
 - [Uso: pantalla, VPN, router, cable](docs/uso.md)
+- [Servidor de avisos propio (ntfy)](docs/ntfy-propio.md)
 - [Volver a Android y solución de problemas](docs/recuperacion.md)
 - [Compilar desde el código fuente](docs/compilar.md)
 - [Notas técnicas del hardware](docs/hardware.md)

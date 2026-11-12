@@ -14,7 +14,7 @@ RAM prices are sky-high, so even a small home server costs more and more. Meanwh
 - Joins a Wi-Fi network by **reading its QR code with the J1's rear or front camera**: no typing the password. Full screen camera with autofocus, automatic or manual brightness, metering, contrast and sharpness.
 - Touchscreen UI (C, framebuffer, antialiased Inter font, colored icons, tile home screen, zero CPU when the screen is off): status, Wi-Fi, VPN clients, logs, resources, battery (time left without the charger), brightness, lock screen (slide to unlock, optional PIN, can be turned off), speed test, power menu.
 - Optional web panel over the phone's own Wi-Fi network or USB, with optional HTTPS.
-- **Phone notifications** (ntfy): power cut, low battery, VPN errors, public IP change, clients connecting.
+- **Phone notifications** (ntfy): power cut, low battery, VPN errors, public IP change, clients connecting; on ntfy.sh or on your own locked server with an access token (guide in Spanish: docs/ntfy-propio.md, script: tools/ntfy-servidor.sh).
 - **Encrypted backup** of the configuration and restore from the web panel.
 - **Updates from GitHub** checked with SHA-256, no reinstall.
 - **Paused VPN clients** without deleting them, with their last connection and traffic.

@@ -845,7 +845,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 bat_limit_save(v);message='Carga limitada al %d %%.'%v if v else 'Sin límite de carga.'
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
             elif action=='notify':
-                notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'])
+                notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'],token=f.get('token',''))
                 message='Avisos guardados.'
             elif action=='backup':
                 blob=backup_make(f.get('pw',''),f.get('pw2',''))
@@ -1887,8 +1887,14 @@ def notify_conf():
         c['topic']='j1-'+secrets.token_hex(10);save('notify.json',c)
     c.setdefault('server',NOTIFY_SERVER);c.setdefault('events',[k for k,_ in NOTIFY_EVENTS]);c['enabled']=c.get('enabled') is True
     return c
-def notify_save(enabled=None, server=None, events=None, new_topic=False):
+def notify_save(enabled=None, server=None, events=None, new_topic=False, token=None):
     c=notify_conf()
+    if token:
+        # access token of an own ntfy server (publish only); empty keeps the saved one, '-' removes it
+        token=token.strip()
+        if token=='-':c.pop('token',None)
+        elif re.fullmatch(r'tk_[A-Za-z0-9]{20,64}',token):c['token']=token
+        else:raise ValueError('El token de ntfy empieza por tk_')
     if enabled is not None:c['enabled']=bool(enabled)
     if server is not None:
         server=server.strip().rstrip('/') or NOTIFY_SERVER;u=urllib.parse.urlsplit(server)
@@ -1902,7 +1908,9 @@ def notify_url(c=None):
 def notify_send(title, text, tags=(), prio=3):
     c=notify_conf()
     body=json.dumps({'topic':c['topic'],'title':title,'message':text,'tags':list(tags),'priority':prio}).encode()
-    req=urllib.request.Request(c['server'],data=body,method='POST',headers={'Content-Type':'application/json','User-Agent':'j1-open-vpn'})
+    h={'Content-Type':'application/json','User-Agent':'j1-open-vpn'}
+    if c.get('token'):h['Authorization']='Bearer '+c['token']
+    req=urllib.request.Request(c['server'],data=body,method='POST',headers=h)
     with urllib.request.urlopen(req,timeout=15) as r:r.read(4096)
 def notify(kind, title, text, tags=(), prio=3):
     c=notify_conf()
@@ -1952,6 +1960,7 @@ def ui_notify(arg):
     s.small('Llegan a la app ntfy (o al navegador) suscrita a tu tema secreto. Escanea el QR con el móvil para suscribirte.','m')
     s.add('Q',','.join(qr_rows(notify_url(c))))
     s.small(notify_url(c),'m')
+    if c.get('token'):s.small('Servidor propio con token: solo el J1 puede publicar','g')
     if c['enabled']:s.button('notify.test','Enviar aviso de prueba','p','notify')
     s.gap().label('Avisar cuando:')
     for k,n in NOTIFY_EVENTS:
@@ -1966,7 +1975,9 @@ def notify_section():
         '<label><input type=checkbox name=enabled value=1'+(' checked' if c['enabled'] else '')+'> Enviar avisos</label>'+
         ''.join('<label><input type=checkbox name=ev_'+k+' value=1'+(' checked' if k in c['events'] else '')+'> '+esc(n)+'</label>' for k,n in NOTIFY_EVENTS)+
         '<label>Servidor<input name=server value="'+esc(c['server'])+'" placeholder="'+NOTIFY_SERVER+'"></label>'
-        '<small>Por defecto el servidor público ntfy.sh; puedes poner el tuyo.</small><br><button>Guardar avisos</button></form>'
+        '<small>Por defecto el servidor público ntfy.sh; puedes poner el tuyo.</small>'
+        '<label>Token de acceso (servidor propio)<input type=password name=token autocomplete=off placeholder="'+('Guardado; vacío = conservarlo, - = quitarlo' if c.get('token') else 'tk_... (solo si tu servidor lo pide)')+'"></label>'
+        '<small>Con un servidor propio que exige permiso, el J1 publica con este token: nadie más puede mandarte avisos.</small><br><button>Guardar avisos</button></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=notifytest><button class=sec>Enviar aviso de prueba</button></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=notifytopic><button class=sec>Cambiar el tema secreto</button><small>El tema anterior deja de recibir avisos: vuelve a suscribirte.</small></form></section>')
 def notify_test():

@@ -527,4 +527,18 @@ class Tests(unittest.TestCase):
   app.https_cert();pem=(app.STATE/'https.pem').read_text();self.assertIn('PRIVATE KEY',pem);self.assertIn('CERTIFICATE',pem)
   self.assertRegex(app.https_fingerprint(),r'^([0-9A-F]{2}:){31}[0-9A-F]{2}$');self.assertEqual(list(app.RUN.glob('https-*')),[])
   import ssl;ctx=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);ctx.load_cert_chain(app.cert_path())
+ def test_notify_token(self):
+  app.notify_save(token='tk_'+'a'*29);self.assertEqual(app.notify_conf()['token'],'tk_'+'a'*29)
+  app.notify_save(token='');self.assertEqual(app.notify_conf()['token'],'tk_'+'a'*29)   # empty keeps it
+  self.assertRaises(ValueError,app.notify_save,token='secret')
+  self.vpn0();s=app.page().decode();self.assertNotIn('tk_'+'a'*29,s);self.assertIn('Guardado; vacío',s)
+  seen={}
+  class R:
+   def __enter__(s):return s
+   def __exit__(s,*a):pass
+   def read(s,n):return b''
+  def op(req,timeout):seen['auth']=req.get_header('Authorization');return R()
+  with patch.object(app.urllib.request,'urlopen',side_effect=op):app.notify_send('t','x')
+  self.assertEqual(seen['auth'],'Bearer tk_'+'a'*29)
+  app.notify_save(token='-');self.assertNotIn('token',app.notify_conf())
 if __name__=='__main__':unittest.main(verbosity=2)
