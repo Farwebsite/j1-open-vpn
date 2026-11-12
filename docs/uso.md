@@ -125,7 +125,7 @@ El J1 puede avisarte en el móvil (pantalla *Avisos* o panel web, sección *Avis
 - cambia la IP pública de casa (con el DNS de Cloudflare activado);
 - se conecta un cliente de la VPN.
 
-Usa [ntfy](https://ntfy.sh): instala su app (o usa el navegador) y suscríbete a la dirección que muestra el J1, también como QR en la pantalla. El tema es una cadena secreta generada en el J1: quien la conozca puede leer los avisos, por eso los textos **no llevan IPs, claves ni contraseñas**. *Cambiar el tema secreto* deja de enviar al anterior. Por defecto usa el servidor público `ntfy.sh`; en el panel se puede poner uno propio (`https://`) con **token de acceso**, para que solo el J1 pueda publicar y nadie pueda mandarte avisos falsos: ver [Servidor de avisos propio](ntfy-propio.md). Vienen desactivados: actívalos y pulsa *Enviar aviso de prueba*.
+Usa [ntfy](https://ntfy.sh): instala su app (o usa el navegador) y suscríbete a la dirección que muestra el J1, también como QR en la pantalla. El tema es una cadena secreta generada en el J1: quien la conozca puede leer los avisos, por eso los textos **no llevan IPs, claves ni contraseñas**. *Cambiar el tema secreto* (o *Tema nuevo al azar* en la pantalla) deja de enviar al anterior. También se puede **escribir el tema**: empieza por `j1-` y, sin token de acceso, debe tener al menos 16 caracteres más para que no se pueda adivinar. Por defecto usa el servidor público `ntfy.sh`; en el panel se puede poner uno propio (`https://`) con **token de acceso**, para que solo el J1 pueda publicar y nadie pueda mandarte avisos falsos: ver [Servidor de avisos propio](ntfy-propio.md). Vienen desactivados: actívalos y pulsa *Enviar aviso de prueba*.
 
 ## Copia de seguridad
 

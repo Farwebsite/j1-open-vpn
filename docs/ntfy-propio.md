@@ -45,6 +45,7 @@ Se necesita:
 5. **J1:** panel web → *Avisos al móvil*.
    - Servidor: `https://avisos.example.com:8443`, **con el puerto**.
    - Token de acceso: el `tk_...`.
+   - Tema: el que viene al azar o uno tuyo, siempre empezando por `j1-` (el script solo da permiso a `j1-*`). Con token puede ser corto, porque sin credenciales nadie lo lee.
    - *Guardar avisos* → *Enviar aviso de prueba*.
    - El token no se vuelve a mostrar: el campo vacío lo conserva y `-` lo quita.
 6. **Móvil:** app ntfy.

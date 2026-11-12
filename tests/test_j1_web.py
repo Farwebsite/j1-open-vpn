@@ -541,4 +541,16 @@ class Tests(unittest.TestCase):
   with patch.object(app.urllib.request,'urlopen',side_effect=op):app.notify_send('t','x')
   self.assertEqual(seen['auth'],'Bearer tk_'+'a'*29)
   app.notify_save(token='-');self.assertNotIn('token',app.notify_conf())
+ def test_notify_topic_typed(self):
+  old=app.notify_conf()['topic']
+  for bad in ('mi-tema','j1-con espacio','j1-'+'x'*62,'j1-ñ'):self.assertRaises(ValueError,app.notify_save,topic=bad)
+  self.assertRaisesRegex(ValueError,'difícil de adivinar',app.notify_save,topic='j1-casa')   # public server, no token
+  self.assertEqual(app.notify_conf()['topic'],old)
+  app.notify_save(topic='j1-'+'k'*16);self.assertEqual(app.notify_conf()['topic'],'j1-'+'k'*16)
+  app.notify_save(token='tk_'+'a'*29,topic='j1-casa');self.assertEqual(app.notify_conf()['topic'],'j1-casa')   # own server with token
+  app.notify_save(topic='');self.assertEqual(app.notify_conf()['topic'],'j1-casa')   # empty keeps it
+  self.vpn0();self.assertIn('name=topic value="j1-casa"',app.page().decode())
+  with patch.object(app,'qr_rows',return_value=['1']):
+   out=app.ui_request(b'a=notify.topicset&s=notify&f_topic=j1-salon').decode('cp437')
+  self.assertIn('Tema guardado',out);self.assertIn('F	topic	Tema (empieza por j1-)	j1-salon',out);self.assertEqual(app.notify_conf()['topic'],'j1-salon')
 if __name__=='__main__':unittest.main(verbosity=2)

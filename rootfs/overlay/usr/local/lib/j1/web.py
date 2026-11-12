@@ -845,7 +845,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 bat_limit_save(v);message='Carga limitada al %d %%.'%v if v else 'Sin límite de carga.'
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
             elif action=='notify':
-                notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'],token=f.get('token',''))
+                notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'],token=f.get('token',''),topic=f.get('topic'))
                 message='Avisos guardados.'
             elif action=='backup':
                 blob=backup_make(f.get('pw',''),f.get('pw2',''))
@@ -1729,6 +1729,7 @@ def ui_action(a, f):
     if verb in ('notify.on','notify.off'):notify_save(enabled=verb=='notify.on');return 'notify','Avisos '+('activados' if verb=='notify.on' else 'desactivados')
     if verb=='notify.test':notify_test();return 'notify','Aviso de prueba enviado'
     if verb=='notify.topic':notify_save(new_topic=True);return 'notify','Tema nuevo: vuelve a suscribirte'
+    if verb=='notify.topicset':notify_save(topic=f.get('topic',''));return 'notify','Tema guardado: suscríbete a él en la app'
     if verb=='notify.ev':
         k,_,on=arg.partition(':');ev=notify_conf()['events']
         if k not in dict(NOTIFY_EVENTS) or on not in ('0','1'):raise ValueError('Opción no válida')
@@ -1881,13 +1882,16 @@ def upnp_sync():
 NOTIFY_EVENTS=(('power','Corriente: se va o vuelve (cargador) y encendido'),('bat','Batería baja o caliente'),
                ('vpn','La VPN falla o vuelve a funcionar'),('ip','Cambia la IP pública de casa'),('client','Se conecta un cliente de la VPN'))
 NOTIFY_SERVER='https://ntfy.sh'
+# topics start with j1- (the own-server script gives access to j1-*)
+NOTIFY_TOPIC=re.compile(r'j1-[A-Za-z0-9_-]{1,61}')
+NOTIFY_TOPIC_PUBLIC=16   # minimum characters after j1- without a token: hard to guess
 def notify_conf():
     c=load('notify.json',{})
-    if not isinstance(c.get('topic'),str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,64}',c['topic']):
+    if not isinstance(c.get('topic'),str) or not NOTIFY_TOPIC.fullmatch(c['topic']):
         c['topic']='j1-'+secrets.token_hex(10);save('notify.json',c)
     c.setdefault('server',NOTIFY_SERVER);c.setdefault('events',[k for k,_ in NOTIFY_EVENTS]);c['enabled']=c.get('enabled') is True
     return c
-def notify_save(enabled=None, server=None, events=None, new_topic=False, token=None):
+def notify_save(enabled=None, server=None, events=None, new_topic=False, token=None, topic=None):
     c=notify_conf()
     if token:
         # access token of an own ntfy server (publish only); empty keeps the saved one, '-' removes it
@@ -1902,6 +1906,13 @@ def notify_save(enabled=None, server=None, events=None, new_topic=False, token=N
         c['server']=server
     if events is not None:c['events']=[k for k,_ in NOTIFY_EVENTS if k in events]
     if new_topic:c['topic']='j1-'+secrets.token_hex(10)
+    if topic is not None and topic.strip() and topic.strip()!=c['topic']:
+        topic=topic.strip()
+        if not NOTIFY_TOPIC.fullmatch(topic):raise ValueError('El tema empieza por j1- y solo lleva letras, números, - y _ (máximo 64)')
+        # without a token anyone who guesses the topic reads it and can publish in it
+        if not c.get('token') and len(topic)-3<NOTIFY_TOPIC_PUBLIC:
+            raise ValueError('Sin token de acceso el tema debe ser difícil de adivinar: al menos %d caracteres después de j1-'%NOTIFY_TOPIC_PUBLIC)
+        c['topic']=topic
     save('notify.json',c);log('Avisos: '+('activados' if c['enabled'] else 'desactivados'))
 def notify_url(c=None):
     c=c or notify_conf();return c['server']+'/'+c['topic']
@@ -1965,7 +1976,8 @@ def ui_notify(arg):
     s.gap().label('Avisar cuando:')
     for k,n in NOTIFY_EVENTS:
         on=k in c['events'];s.toggle('notify.ev:%s:%d'%(k,0 if on else 1),n,on)
-    s.gap().button('notify.topic','Cambiar el tema secreto','i')
+    s.gap().field('topic','Tema (empieza por j1-)',c['topic']).button('notify.topicset','Guardar tema','p')
+    s.button('notify.topic','Tema nuevo al azar','i')
     return s.small('Cambiar el tema deja de enviar avisos al anterior: vuelve a suscribirte. Los avisos no llevan IPs ni claves.','m')
 def notify_section():
     c=notify_conf()
@@ -1977,7 +1989,9 @@ def notify_section():
         '<label>Servidor<input name=server value="'+esc(c['server'])+'" placeholder="'+NOTIFY_SERVER+'"></label>'
         '<small>Por defecto el servidor público ntfy.sh; puedes poner el tuyo.</small>'
         '<label>Token de acceso (servidor propio)<input type=password name=token autocomplete=off placeholder="'+('Guardado; vacío = conservarlo, - = quitarlo' if c.get('token') else 'tk_... (solo si tu servidor lo pide)')+'"></label>'
-        '<small>Con un servidor propio que exige permiso, el J1 publica con este token: nadie más puede mandarte avisos.</small><br><button>Guardar avisos</button></form>'
+        '<small>Con un servidor propio que exige permiso, el J1 publica con este token: nadie más puede mandarte avisos.</small>'
+        '<label>Tema<input name=topic value="'+esc(c['topic'])+'" maxlength=64 pattern="j1-[A-Za-z0-9_-]+" required autocomplete=off></label>'
+        +('<small>Empieza por j1-. Sin token, que sea largo y difícil de adivinar (%d caracteres o más después de j1-). Si lo cambias, vuelve a suscribirte en la app.</small><br><button>Guardar avisos</button></form>'%NOTIFY_TOPIC_PUBLIC)+
         '<form method=post>'+hidden()+'<input type=hidden name=action value=notifytest><button class=sec>Enviar aviso de prueba</button></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=notifytopic><button class=sec>Cambiar el tema secreto</button><small>El tema anterior deja de recibir avisos: vuelve a suscribirte.</small></form></section>')
 def notify_test():
