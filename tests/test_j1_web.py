@@ -47,7 +47,8 @@ class Tests(unittest.TestCase):
   routes='default via 10.10.1.1 dev eth0 metric 50 \ndefault via 10.10.1.1 dev wlan0 metric 100 \n'
   with patch.object(app.subprocess,'run',side_effect=run),patch.object(app,'command',return_value=routes),patch.object(app,'Path') as P:
    self.assertTrue(app.firewall())
-  nat=[c[c.index('-o')+1] for c in calls if 'MASQUERADE' in c];self.assertEqual(nat,['eth0','wlan0'])
+  # one rule for every link but the tunnel: also a cable or Wi-Fi that comes up later
+  nat=[c[c.index('-o')-1:c.index('-o')+2] for c in calls if 'MASQUERADE' in c];self.assertEqual(nat,[['!','-o','wg0']])
  def test_ui_home_cp437_and_buttons(self):
   (app.RUN/'wifi-summary').write_text('Wi-Fi: 10.10.1.24\n')
   out=app.ui_request(b'a=nav%3Ahome')
@@ -553,4 +554,27 @@ class Tests(unittest.TestCase):
   with patch.object(app,'qr_rows',return_value=['1']):
    out=app.ui_request(b'a=notify.topicset&s=notify&f_topic=j1-salon').decode('cp437')
   self.assertIn('Tema guardado',out);self.assertIn('F	topic	Tema (empieza por j1-)	j1-salon',out);self.assertEqual(app.notify_conf()['topic'],'j1-salon')
+ def test_ssh_network_rules(self):
+  import ipaddress
+  nets=[ipaddress.ip_interface('192.168.1.40/24'),ipaddress.ip_interface('192.168.1.41/24'),ipaddress.ip_interface('192.168.1.40/32')]
+  self.assertEqual(app.ssh_conf(),{'lan':False,'vpn':False})
+  r=app.ssh_rules(app.ssh_conf(),nets);self.assertEqual(r[1],['-i','rndis0','-j','ACCEPT']);self.assertEqual(r[-1],['-j','DROP']);self.assertEqual(len(r),3)
+  with patch.object(app,'apply_vpn'):
+   out=app.ui_request(b'a=ssh.lan%3A1&s=panel').decode('cp437')
+  self.assertIn('SSH desde la red local activado',out);self.assertIn('S\tssh.lan:0\tSSH desde la red local\t1',out)
+  r=app.ssh_rules(app.ssh_conf(),nets)
+  self.assertIn(['!','-i','wg0','-s','192.168.1.0/24','-j','ACCEPT'],r);self.assertEqual(len(r),4)   # one rule per network
+  with patch.object(app,'apply_vpn'):app.ui_request(b'a=ssh.vpn%3A1&s=panel');app.ui_request(b'a=ssh.lan%3A0&s=panel')
+  self.assertEqual(app.ssh_conf(),{'lan':False,'vpn':True});self.assertIn(['-i','wg0','-s','10.66.0.0/24','-j','ACCEPT'],app.ssh_rules(app.ssh_conf(),nets))
+  self.assertIn(b'\te\n',app.ui_request(b'a=ssh.lan%3A5&s=panel'))
+  # firewall(): one NAT rule for any link but the tunnel, SSH chain rebuilt
+  calls=[]
+  class P:returncode=0
+  def run(args,**k):calls.append(args[3:]);return P()
+  with patch.object(app.subprocess,'run',run),patch.object(app,'command',return_value='default via 192.168.1.1 dev eth0'),patch.object(app,'Path') as path:
+   self.assertTrue(app.firewall())
+  self.assertIn(['-t','nat','-A','J1_NAT','-s','10.66.0.0/24','!','-o','wg0','-j','MASQUERADE'],calls)
+  self.assertIn(['-A','J1_SSH','-i','wg0','-s','10.66.0.0/24','-j','ACCEPT'],calls);self.assertEqual(calls[-1],['-A','J1_SSH','-j','DROP'])
+  self.vpn0()
+  with patch.object(app,'lan_ips',return_value=['192.168.1.40']):self.assertIn('root@10.66.0.1</code> (VPN)',app.ssh_section())
 if __name__=='__main__':unittest.main(verbosity=2)

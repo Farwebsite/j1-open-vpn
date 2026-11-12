@@ -98,7 +98,16 @@ if [ -d /sys/class/net/rndis0 ]; then
  ip link set rndis0 up
  log 'Red USB lista: 192.168.77.1'
 fi
-/usr/sbin/dropbear -E -R -s -j -k -p 192.168.77.1:22 >/run/ssh.log 2>&1
+# SSH: every IPv4 address, filtered by J1_SSH: USB only until web.py adds the
+# home network / VPN chosen in the panel. Without the filter, USB only.
+ssh_fw() {
+ ipt='/usr/sbin/iptables-legacy -w 2'
+ $ipt -N J1_SSH 2>/dev/null
+ $ipt -F J1_SSH && $ipt -A J1_SSH -i rndis0 -j ACCEPT && $ipt -A J1_SSH -j DROP || return 1
+ $ipt -C INPUT -p tcp --dport 22 -j J1_SSH 2>/dev/null || $ipt -I INPUT 1 -p tcp --dport 22 -j J1_SSH
+}
+if ssh_fw; then ssh_addr=0.0.0.0:22; else ssh_addr=192.168.77.1:22; log 'SSH: sin cortafuegos, solo por USB'; fi
+/usr/sbin/dropbear -E -R -s -j -k -p "$ssh_addr" >/run/ssh.log 2>&1
 cat >/run/dnsmasq-usb.conf <<'EOF'
 interface=rndis0
 bind-interfaces

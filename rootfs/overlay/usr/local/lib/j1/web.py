@@ -185,12 +185,13 @@ def firewall():
     call('-t','nat','-N','J1_NAT',check=False)
     if call('-t','nat','-C','POSTROUTING','-j','J1_NAT',check=False): call('-t','nat','-A','POSTROUTING','-j','J1_NAT')
     call('-t','nat','-F','J1_NAT')
-    # every uplink (cable and Wi-Fi), so clients keep working if one drops
+    # any link but the tunnel: a rule per uplink missed the cable or Wi-Fi
+    # that came up between two passes
+    call('-t','nat','-A','J1_NAT','-s','10.66.0.0/24','!','-o','wg0','-j','MASQUERADE')
     routes = command(['ip','-4','route','show','default'])
     uplinks = [d for d in dict.fromkeys(re.findall(r'\bdev\s+(\S+)', routes))
                if d not in ('wg0','rndis0') and not d.startswith('p2p')]
-    for d in uplinks:
-        call('-t','nat','-A','J1_NAT','-s','10.66.0.0/24','-o',d,'-j','MASQUERADE')
+    ssh_firewall(call)
     Path('/proc/sys/net/ipv4/ip_forward').write_text('1\n')
     return bool(uplinks)
 
@@ -517,9 +518,33 @@ def usb_section():
         'Desactivado: el J1 no da 5 V nunca. El cable tiene prioridad sobre la Wi-Fi para Internet y la VPN.</small><br>'
         '<button>Guardar alimentación USB</button></form></section>')
 
-# ---- SSH over USB (optional): dropbear listens on 192.168.77.1 only and
-# accepts keys only; /root/.ssh/authorized_keys links to this file, which lives
-# with the configuration (it survives a system reinstall)
+# ---- SSH (optional): keys only; /root/.ssh/authorized_keys links to this
+# file, which lives with the configuration (it survives a system reinstall).
+# dropbear listens on every IPv4 address and the J1_SSH chain lets in USB
+# always, and the home network and the VPN when chosen (j1-init starts with
+# USB only). If the J1 is far away and the VPN fails, the home network is the
+# way back in.
+def ssh_conf():
+    c=load('ssh.json',{})
+    return {'lan':c.get('lan') is True,'vpn':c.get('vpn') is True}
+def ssh_rules(c, nets):
+    r=[['-m','conntrack','--ctstate','ESTABLISHED,RELATED','-j','ACCEPT'],['-i','rndis0','-j','ACCEPT']]
+    if c['vpn']:r.append(['-i','wg0','-s',str(VPN_NET),'-j','ACCEPT'])
+    if c['lan']:
+        # a fixed IP shows up as /32 too: only the J1 itself, so left out
+        for n in dict.fromkeys(str(n.network) for n in nets if n.network.prefixlen<32):r.append(['!','-i','wg0','-s',n,'-j','ACCEPT'])
+    return r+[['-j','DROP']]
+def ssh_firewall(call):
+    call('-N','J1_SSH',check=False)
+    if call('-C','INPUT','-p','tcp','--dport','22','-j','J1_SSH',check=False):call('-I','INPUT','1','-p','tcp','--dport','22','-j','J1_SSH')
+    # flushed chain = accept for a moment, never a drop of the open sessions
+    call('-F','J1_SSH')
+    for r in ssh_rules(ssh_conf(),lan_nets() if ssh_conf()['lan'] else []):call('-A','J1_SSH',*r)
+def ssh_set(**kw):
+    raw=load('ssh.json',{});raw.update({k:bool(v) for k,v in kw.items()});save('ssh.json',raw);c=ssh_conf()
+    log('SSH: USB'+''.join(' + '+n for n,k in (('red local','lan'),('VPN','vpn')) if c[k]))
+    try:apply_vpn()
+    except Exception:raise RuntimeError('Guardado, pero no se pudo aplicar el cortafuegos')
 SSH_KEY_RE=re.compile(r'(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+={0,3}( [ -~]{0,100})?')
 def ssh_keys():
     try:return [l for l in (STATE/'authorized_keys').read_text().splitlines() if SSH_KEY_RE.fullmatch(l)]
@@ -532,7 +557,7 @@ def ssh_add(pub):
     with LOCK:
         keys=ssh_keys()
         if pub not in keys:atomic(STATE/'authorized_keys',''.join(k+'\n' for k in keys+[pub]))
-    log('SSH por USB: clave añadida')
+    log('SSH: clave añadida')
 def ssh_generate():
     # new key pair: the public half is authorized, the private half is only
     # handed to the browser (OpenSSH format) and never stored on the J1
@@ -552,7 +577,7 @@ def ssh_disable():
     with LOCK:
         try:(STATE/'authorized_keys').unlink()
         except FileNotFoundError:pass
-    log('SSH por USB desactivado')
+    log('SSH desactivado')
 def lock_section():
     on=display_lock();pin=on and display_pin() is not None
     return ('<section id=pantalla><h2>Pantalla de bloqueo</h2><p>'+('Activada' if on else 'Desactivada')+(' · con código' if pin else '')+'</p>'+
@@ -593,7 +618,14 @@ def https_section():
 def ssh_section():
     n=len(ssh_keys())
     state='Activo: %d clave%s autorizada%s.'%(n,'' if n==1 else 's','' if n==1 else 's') if n else 'Desactivado (ninguna clave autorizada).'
-    return pw_section()+ap_section()+lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH por USB</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo funciona con el J1 conectado al PC por USB: <code>ssh -i clave root@192.168.77.1</code>. Nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).</p>'
+    c=ssh_conf();ips=lan_ips()
+    where=''.join('<br><code>ssh -i clave root@'+esc(ip)+'</code> (red local)' for ip in ips) if c['lan'] else ''
+    return pw_section()+ap_section()+lock_section()+tz_section()+('<section id=ssh><h2>Acceso SSH</h2><p>'+state+'</p><p class=muted>Opcional, para usuarios avanzados. Solo con clave (sin contraseña) y nunca desde Internet. Por USB siempre: <code>ssh -i clave root@192.168.77.1</code>'+where+
+        ('<br><code>ssh -i clave root@10.66.0.1</code> (VPN)' if c['vpn'] else '')+'</p>'
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=sshnet>'
+        '<label><input type=checkbox name=lan value=1'+(' checked' if c['lan'] else '')+'> También desde la red local (Wi-Fi o cable de casa)</label>'
+        '<label><input type=checkbox name=vpn value=1'+(' checked' if c['vpn'] else '')+'> También desde la VPN</label>'
+        '<small>Con el J1 lejos, la red local es la vía de entrada si la VPN falla, desde otro equipo de esa red. No abras el puerto 22 en el router.</small><br><button>Guardar acceso SSH</button></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshgen><button>Generar una clave y descargarla</button><small>Guarda el archivo descargado: es la llave para entrar y no se puede volver a descargar.</small></form>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=sshadd><label>O pega tu clave pública (id_ed25519.pub)<textarea name=key rows=3 maxlength=1000></textarea></label><button>Añadir clave pública</button></form>'
         +('<form method=post>'+hidden()+'<input type=hidden name=action value=sshoff><button class=danger>Desactivar SSH (borrar todas las claves)</button></form>' if n else '')+'</section>')
@@ -822,7 +854,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif action=='sshgen':
                 key=ssh_generate()
                 self.respond(key,content='application/octet-stream',filename='j1-open-vpn-ssh-key');return
-            elif action=='sshadd':ssh_add(f.get('key',''));message='Clave añadida. Ya puedes entrar por USB: ssh root@192.168.77.1'
+            elif action=='sshadd':ssh_add(f.get('key',''));message='Clave añadida. Ya puedes entrar por USB: ssh root@192.168.77.1'+(' o por la red local' if ssh_conf()['lan'] else '')
             elif action=='panelpw':
                 if not panel_password_ok(f.get('current','')):raise ValueError('La contraseña actual no es correcta')
                 panel_password_set(f.get('pw',''),f.get('pw2',''));message='Contraseña del panel cambiada: el navegador te la volverá a pedir.'
@@ -844,6 +876,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 v=f.get('limit','');v=(int(v) if v.isdigit() else -1) if f.get('on')=='1' else 0
                 bat_limit_save(v);message='Carga limitada al %d %%.'%v if v else 'Sin límite de carga.'
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
+            elif action=='sshnet':ssh_set(lan=f.get('lan')=='1',vpn=f.get('vpn')=='1');message='Acceso SSH guardado.'
             elif action=='notify':
                 notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'],token=f.get('token',''),topic=f.get('topic'))
                 message='Avisos guardados.'
@@ -1473,6 +1506,11 @@ def ui_panel(arg):
     s.gap().label('Contraseña del panel (usuario admin):').small('Propia' if own else 'La misma clave de la red de configuración','g' if own else 'm')
     s.field('pw','Nueva contraseña (8 a 64 caracteres)','','p').field('pw2','Repítela','','p').button('panel.pw','Cambiar contraseña del panel','p')
     if own:s.button('panel.pwreset','Volver a usar la clave de la red','i')
+    sc=ssh_conf();keys=len(ssh_keys())
+    s.gap().label('SSH (solo con clave; por USB siempre):')
+    s.toggle('ssh.lan:0' if sc['lan'] else 'ssh.lan:1','SSH desde la red local',sc['lan'])
+    s.toggle('ssh.vpn:0' if sc['vpn'] else 'ssh.vpn:1','SSH desde la VPN',sc['vpn'])
+    if not keys:s.small('Ninguna clave autorizada: añádela en el panel web (Acceso SSH).','y')
     s.gap().label('IP del J1 en la red local:')
     return s.button('nav:ip:wlan0','IP de la Wi-Fi (DHCP o fija)','i','ip').button('nav:ip:eth','IP del cable (DHCP o fija)','i','ip')
 
@@ -1714,6 +1752,10 @@ def ui_action(a, f):
         https_set(arg=='1');return 'panel','HTTPS '+('activado' if arg=='1' else 'desactivado')
     if verb=='panel.pw':panel_password_set(f.get('pw',''),f.get('pw2',''));return 'panel','Contraseña del panel cambiada'
     if verb=='panel.pwreset':panel_password_reset();return 'panel','El panel vuelve a usar la clave de la red'
+    if verb in ('ssh.lan','ssh.vpn'):
+        if arg not in ('0','1'):raise ValueError('Opción no válida')
+        k=verb[4:];ssh_set(**{k:arg=='1'})
+        return 'panel','SSH desde '+('la red local' if k=='lan' else 'la VPN')+' '+('activado' if arg=='1' else 'desactivado')
     if verb in ('panel.lan','panel.vpn'):
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         k=verb[6:];panel_set(**{k:arg=='1'})
