@@ -25,7 +25,8 @@ El Galaxy J1 de 2015 (2 núcleos a 1,2 GHz, 512 MB de RAM) no sirve ya como móv
 - **Cable de red por USB (OTG):** con un adaptador USB‑Ethernet el J1 lo alimenta solo; el cable tiene prioridad y el **Wi-Fi queda de reserva** con la misma IP (un solo puerto abierto en el router).
 - **Apertura automática del puerto** en el router (UPnP) y **DNS dinámico** con Cloudflare (opcional).
 - **Red Wi-Fi propia de configuración** (`DIRECT-J1-VPN-XXXX`) para configurarlo sin cables.
-- **SSH por USB opcional** (solo con clave), activable desde el panel web.
+- **SSH opcional** (solo con clave): por USB, y si lo activas desde la red local o la VPN.
+- **Vigilantes:** reinician WireGuard si deja de responder, la red y, si hace falta, el J1 cuando se queda sin Internet; reinicio programado opcional.
 - **Interfaz moderna:** letra Inter suavizada, iconos de color y accesos en cuadrícula sobre fondo negro.
 - **Pantalla de bloqueo** desactivable: con la pantalla apagada, una mano encima no pulsa nada; hay que deslizar para usarla. **Código numérico** opcional.
 - **Zona horaria** seleccionable desde la pantalla o la web (España, Canarias, Latinoamérica, EE. UU.…).

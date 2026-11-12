@@ -87,7 +87,7 @@ Las capturas del README se generan en el teléfono con `tools/capturas.sh`. Usa 
 
 ## Acceso SSH
 
-Se activa desde el panel web ([uso.md → Acceso SSH por USB](uso.md#acceso-ssh-por-usb-opcional)). Para que tu imagen ya lo traiga activado con tu clave, compila con:
+Se activa desde el panel web ([uso.md → Acceso SSH](uso.md#acceso-ssh-opcional)). Para que tu imagen ya lo traiga activado con tu clave, compila con:
 
 ```sh
 sudo SSH_PUBKEY=$HOME/.ssh/id_ed25519.pub ./build.sh

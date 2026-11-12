@@ -50,7 +50,9 @@ if [ ! -s /etc/j1/mac.info ] && [ -n "$(part efs)" ]; then
   umount /run/android-efs
  fi
 fi
-/usr/local/sbin/j1-klog >/dev/null 2>&1 </dev/null &
+# helpers run at a lower priority than WireGuard (its crypto runs at -20,
+# packets in softirq): under load the VPN keeps the CPU
+nice -n 19 /usr/local/sbin/j1-klog >/dev/null 2>&1 </dev/null &
 hostname galaxy-j1-linux
 ip link set lo up
 mkdir -p /dev/net /efs/wifi /run/wpa_supplicant /run/wireguard
@@ -69,7 +71,7 @@ printf 'WG: iniciando\n' >/run/vpn-summary
 # Started again if it stops (with the time zone saved now). Meanwhile charging
 # comes back on: web.py pauses the charger at the charge limit.
 (while :; do
-  TZ="$(cat /etc/j1/tz 2>/dev/null || echo CET-1CEST,M3.5.0,M10.5.0/3)" /usr/bin/python3 /usr/local/lib/j1/web.py >>/run/web.log 2>&1 </dev/null
+  TZ="$(cat /etc/j1/tz 2>/dev/null || echo CET-1CEST,M3.5.0,M10.5.0/3)" nice -n 10 /usr/bin/python3 /usr/local/lib/j1/web.py >>/run/web.log 2>&1 </dev/null
   echo 0 >/sys/class/power_supply/battery/batt_slate_mode
   log 'Panel web detenido: se vuelve a iniciar'
   sleep 3
@@ -125,7 +127,7 @@ dnsmasq --conf-file=/run/dnsmasq-usb.conf
 ip link set wlan0 up
 wpa_supplicant -Dnl80211 -iwlan0 -c/etc/j1/wifi.conf -I/etc/j1/p2p.conf -e/etc/j1/hostapd.entropy -P/run/wpa_supplicant.pid >/run/wpa-client.log 2>&1 </dev/null &
 echo $! >/run/wpa_supplicant.pid
-/usr/local/sbin/j1-network >/run/network.log 2>&1 </dev/null &
+nice -n 10 /usr/local/sbin/j1-network >/run/network.log 2>&1 </dev/null &
 echo $! >/run/network.pid
 log 'Servicios de configuracion iniciados'
 trap 'log "Senal recibida"' TERM INT

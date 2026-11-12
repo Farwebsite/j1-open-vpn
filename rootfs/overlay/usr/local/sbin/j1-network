@@ -2,6 +2,11 @@
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 last_state=unknown
 last_ap_error=0
+ap_n=0
+# runs every 3 s next to WireGuard on a small CPU: files are read with the
+# shell's own read, not cat/cut, so a pass starts as few processes as possible
+nl='
+'
 # adopt the wlan0 udhcpc of a previous instance (restart without reboot)
 dhcp_pid=$(cat /run/udhcpc.pid 2>/dev/null)
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>/run/appliance.log; }
@@ -56,10 +61,11 @@ while :; do
   cable_bad_until=0
   log 'Configuracion IP aplicada'
  fi
- now=$(cut -d. -f1 /proc/uptime)
+ read -r now _ </proc/uptime; now=${now%.*}
  # time zone changed from the screen or the web: logs and children follow
- tz=$(cat /etc/j1/tz 2>/dev/null) && [ -n "$tz" ] && [ "$tz" != "$TZ" ] && export TZ="$tz"
- host=$(cat $P/j1_host_active 2>/dev/null)
+ tz=; read -r tz 2>/dev/null </etc/j1/tz
+ [ -n "$tz" ] && [ "$tz" != "$TZ" ] && export TZ="$tz"
+ host=; read -r host 2>/dev/null <$P/j1_host_active
  if [ "$host" = 0 ] && [ "$last_host" != 0 ] && [ "$(cat $P/j1_boost_on)" = 0 ]; then
   echo 4 >/sys/bus/i2c/devices/3-0049/SM5701_core 2>/dev/null
  fi
@@ -69,7 +75,8 @@ while :; do
  if [ -n "$shared" ]; then
   for mark in /run/static-eth* /run/static-usb*; do [ -e "$mark" ] && standby=1; done
  fi
- state=$(wpa_cli -i wlan0 -p /run/wpa_supplicant status 2>/dev/null | sed -n 's/^wpa_state=//p')
+ st=$(wpa_cli -i wlan0 -p /run/wpa_supplicant status 2>/dev/null)
+ case "$st" in *wpa_state=*) state=${st#*wpa_state=}; state=${state%%"$nl"*} ;; *) state= ;; esac
  # Wi-Fi client switched off from the screen (the config AP keeps running)
  if [ -f /etc/j1/wifi-off ] || [ -n "$standby" ]; then
   case "$state" in DISCONNECTED|INTERFACE_DISABLED|'') ;; *) wpa_cli -i wlan0 -p /run/wpa_supplicant disconnect >/dev/null 2>&1 ;; esac
@@ -107,7 +114,8 @@ while :; do
   if [ -n "$shared" ]; then
    if [ -f /run/static-$dev ]; then
     lost=
-    if [ "$(cat $path/carrier 2>/dev/null)" != 1 ]; then
+    carrier=; read -r carrier 2>/dev/null <$path/carrier
+    if [ "$carrier" != 1 ]; then
      lost='Cable: sin enlace, paso a la Wi-Fi'; hold_cable=
     elif [ "$now" -ge "$next_inet" ]; then
      next_inet=$((now + 15))
@@ -135,7 +143,7 @@ while :; do
     log "$lost"
     continue
    fi
-   carrier=$(cat $path/carrier 2>/dev/null)
+   carrier=; read -r carrier 2>/dev/null <$path/carrier
    [ "$carrier" = 1 ] || { ip link set "$dev" up; cable_bad_until=0; hold_cable=; }
    if [ "$carrier" = 1 ] && [ "$now" -lt "$cable_bad_until" ]; then
     # the Wi-Fi took over: it gets 60 s to connect and must answer pings
@@ -189,11 +197,15 @@ while :; do
   printf 'Cable: desconectado\n' >/run/eth-summary
   log "Cable: $dev desconectado"
  done
- if /usr/local/sbin/j1-ap-ensure; then
-  last_ap_error=0
- elif [ "$last_ap_error" = 0 ]; then
-  log 'AP: esperando al controlador'
-  last_ap_error=1
+ # the config AP: every pass while it is not up, every 15 s once it works
+ ap_n=$((ap_n + 1))
+ if [ "$last_ap_error" != 0 ] || [ $((ap_n % 5)) = 1 ]; then
+  if /usr/local/sbin/j1-ap-ensure; then
+   last_ap_error=0
+  elif [ "$last_ap_error" = 0 ]; then
+   log 'AP: esperando al controlador'
+   last_ap_error=1
+  fi
  fi
  sleep 3
 done

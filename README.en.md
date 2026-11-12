@@ -18,6 +18,8 @@ RAM prices are sky-high, so even a small home server costs more and more. Meanwh
 - **Encrypted backup** of the configuration and restore from the web panel.
 - **Updates from GitHub** checked with SHA-256, no reinstall.
 - **Paused VPN clients** without deleting them, with their last connection and traffic.
+- **Watchdogs:** WireGuard is set up again if it stops answering; with no Internet the network is restarted, then the J1 (at most once every 6 h); optional scheduled reboot.
+- **SSH** (keys only): over USB, and from the home network or the VPN when switched on.
 - **Battery:** real use in mA/W, time left and a charge limit (50-95 %).
 - **USB Ethernet via OTG** (RTL8153 tested): the phone powers the adapter; cable first, **Wi-Fi as standby on the same IP** (single port forward).
 - Automatic port forwarding (UPnP) and Cloudflare dynamic DNS (optional).

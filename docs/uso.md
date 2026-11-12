@@ -50,25 +50,38 @@ El panel **no** debe publicarse en Internet: no redirijas el TCP 80 en el router
 
 **Conexión USB con el PC:** el J1 aparece como una tarjeta de red USB (RNDIS) y le da al PC la IP `192.168.77.2` automáticamente. Windows 10/11 la reconoce sola. Si en el Administrador de dispositivos sale como dispositivo desconocido (*J13G-Linux-USB*), actualiza su driver: *Buscar en mi equipo → Elegir de una lista → Adaptadores de red → Microsoft → Dispositivo compatible con NDIS remoto*. Si el PC no recibe IP, ponle a mano `192.168.77.2`, máscara `255.255.255.252`.
 
-## Acceso SSH por USB (opcional)
+## Acceso SSH (opcional)
 
-Para usuarios avanzados que quieran entrar en la consola de Linux. Viene **desactivado** y solo funciona con el J1 conectado al PC por USB: nunca desde la Wi-Fi ni desde Internet, y solo con clave (sin contraseña).
+Para usuarios avanzados que quieran entrar en la consola de Linux. Viene **desactivado** (sin claves) y solo funciona con clave, nunca con contraseña. Por USB funciona siempre; desde la red de casa y desde la VPN, solo si lo activas. Desde Internet, nunca.
 
-Panel web por USB (http://192.168.77.1) → sección **Acceso SSH por USB**:
+Panel web → sección **Acceso SSH**:
 
 - **Generar una clave y descargarla:** el J1 crea un par de claves, autoriza la pública y te descarga la privada (`j1-open-vpn-ssh-key`). Guárdala bien: no se puede volver a descargar.
 - **O pega tu clave pública** (`id_ed25519.pub`) si ya tienes una.
+- **También desde la red local** (Wi-Fi o cable de casa) y **también desde la VPN**: también en la pantalla del J1, en *Panel web*. Si el J1 está lejos, la red local es la forma de volver a entrar desde otro equipo de esa red cuando la VPN falla. No abras el puerto 22 en el router.
 - **Desactivar SSH** borra todas las claves autorizadas.
 
 Para entrar (PowerShell en Windows 10/11, o Linux/macOS):
 
 ```sh
-ssh -i j1-open-vpn-ssh-key root@192.168.77.1
+ssh -i j1-open-vpn-ssh-key root@192.168.77.1   # USB
+ssh -i j1-open-vpn-ssh-key root@<IP del J1>    # red local, la que muestra el panel
+ssh -i j1-open-vpn-ssh-key root@10.66.0.1      # VPN
 ```
 
 En Linux/macOS, antes: `chmod 600 j1-open-vpn-ssh-key`. En Windows, si `ssh` se queja de los permisos del archivo, guárdalo dentro de tu carpeta de usuario (`C:\Users\<tú>\.ssh\`).
 
 Las claves se guardan con la configuración (`/etc/j1/authorized_keys`), así que sobreviven a una reinstalación del sistema.
+
+## Vigilantes y reinicio
+
+Sistema → **Vigilantes y reinicio** en la pantalla, o la sección *Vigilantes* del panel web. Pensado para un J1 que se queda lejos, sin nadie que lo reinicie:
+
+- **Vigilar WireGuard** (activado): cada minuto comprueba que la interfaz está levantada y responde con su puerto y sus clientes. Si no, la vuelve a configurar y, si sigue mal, la crea de nuevo. Avisa al móvil si tienes los avisos de la VPN activados.
+- **Vigilar Internet** (activado): tras 5 a 60 minutos sin Internet (10 por defecto) reinicia la red (Wi-Fi y cable). **Si no vuelve en otro tanto, reinicia el J1.** Nunca en la primera media hora tras arrancar ni más de una vez cada 6 horas, para que un corte de la conexión de casa no lo tenga reiniciándose sin parar. Al volver Internet avisa de cuánto tiempo estuvo caído.
+- **Reinicio programado** (desactivado): cada día o cada domingo a la hora que elijas. Un minuto sin VPN.
+
+El aviso de *J1 encendido* dice si el reinicio lo hizo un vigilante o el reinicio programado.
 
 ## Clientes VPN
 
@@ -150,7 +163,7 @@ Zonas disponibles: España y Europa central, Canarias y Portugal, Reino Unido e 
 
 El cambio se aplica al momento: el reloj de la pantalla, la web y los registros pasan a la hora nueva sin reiniciar. Solo el registro del kernel sigue con la zona anterior hasta el siguiente arranque.
 
-Para una zona que no está en la lista, con [acceso SSH](#acceso-ssh-por-usb-opcional) escribe su cadena TZ POSIX en `/etc/j1/tz` (por ejemplo `<+0545>-5:45` para Nepal) y reinicia.
+Para una zona que no está en la lista, con [acceso SSH](#acceso-ssh-opcional) escribe su cadena TZ POSIX en `/etc/j1/tz` (por ejemplo `<+0545>-5:45` para Nepal) y reinicia.
 
 ## Dónde se guarda todo
 

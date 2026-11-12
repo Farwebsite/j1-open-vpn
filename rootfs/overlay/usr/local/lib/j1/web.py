@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Personal J1 appliance controller. SPDX-License-Identifier: GPL-2.0"""
 import base64, hashlib, hmac, html, http.server, ipaddress, json, os, re, secrets
-import signal, socketserver, ssl, struct, subprocess, tarfile, threading, time, unicodedata, urllib.error, urllib.parse, urllib.request
+import signal, socket, socketserver, ssl, struct, subprocess, tarfile, threading, time, unicodedata, urllib.error, urllib.parse, urllib.request
 import io, gzip, ctypes, ctypes.util
 from pathlib import Path
 STATE = Path(os.environ.get('J1_STATE', '/etc/j1'))
@@ -110,7 +110,7 @@ ICONS_SVG={
 # each section: icon and color of its tile on the screen
 SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap','#64d2ff'),('bat','Batería','bat','#34c759'),('vpn','WireGuard','vpn','#ff9f0a'),('avisos','Avisos al móvil','notify','#ff375f'),
           ('dns','Cloudflare DNS','dns','#0a84ff'),('usb','Cable USB','cable','#bf5af2'),('clave','Contraseña del panel','key','#5ac8fa'),
-          ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'),
+          ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'),('vigilantes','Vigilantes','vpn','#ff453a'),
           ('https','HTTPS','https','#30d158'),('copia','Copia de seguridad','backup','#30d158'),('actualizar','Actualizar','update','#0a84ff'))
 # moves the page dots of the phone home screen (the swipe itself is CSS)
 DOTS_JS=(b"(function(){var n=document.querySelector('nav.pages'),d=document.querySelectorAll('.dots i');if(!n||!d.length)return;"
@@ -169,7 +169,20 @@ def ensure_vpn_state():
         save('vpn.json', v)
     return v
 
+# what firewall() and apply_vpn() last wrote: the worker calls them every 30 s
+# and each pass costs ~20 processes, so an unchanged state is only written
+# again every 5 minutes (repairs a rule removed by hand)
+APPLIED={}
+REAPPLY=300
+def applied(key, value):
+    return APPLIED.get(key)==value and time.monotonic()-APPLIED.get(key+'_at',-1e9)<REAPPLY
+def applied_set(key, value):APPLIED[key]=value;APPLIED[key+'_at']=time.monotonic()
 def firewall():
+    routes = command(['ip','-4','route','show','default'])
+    uplinks = [d for d in dict.fromkeys(re.findall(r'\bdev\s+(\S+)', routes))
+               if d not in ('wg0','rndis0') and not d.startswith('p2p')]
+    sc=ssh_conf();rules=ssh_rules(sc,lan_nets() if sc['lan'] else [])
+    if applied('fw',rules):return bool(uplinks)
     cmd = ['/usr/sbin/iptables-legacy','-w','2']
     def call(*a, check=True):
         p = subprocess.run(cmd+list(a), capture_output=True, timeout=10)
@@ -188,11 +201,9 @@ def firewall():
     # any link but the tunnel: a rule per uplink missed the cable or Wi-Fi
     # that came up between two passes
     call('-t','nat','-A','J1_NAT','-s','10.66.0.0/24','!','-o','wg0','-j','MASQUERADE')
-    routes = command(['ip','-4','route','show','default'])
-    uplinks = [d for d in dict.fromkeys(re.findall(r'\bdev\s+(\S+)', routes))
-               if d not in ('wg0','rndis0') and not d.startswith('p2p')]
-    ssh_firewall(call)
+    ssh_firewall(call,rules)
     Path('/proc/sys/net/ipv4/ip_forward').write_text('1\n')
+    applied_set('fw',rules)
     return bool(uplinks)
 
 # tunnel MTU: WireGuard's usual 1420 (IPv4 outside, 1500 links); fewer packets for
@@ -202,6 +213,7 @@ def apply_vpn():
     with LOCK:
         v = ensure_vpn_state()
         # in-kernel WireGuard (kernel -j1wg) is far cheaper; wireguard-go is the fallback
+        if not Path('/sys/class/net/wg0').exists():APPLIED.clear()
         if not Path('/sys/class/net/wg0').exists() and \
            subprocess.run(['ip','link','add','wg0','type','wireguard'],capture_output=True,timeout=10).returncode==0:
             log('WireGuard: modulo del kernel')
@@ -218,11 +230,14 @@ def apply_vpn():
             if c.get('paused'):continue   # paused: no peer, so no tunnel, until resumed
             lines += ['','[Peer]','PublicKey = '+c['public_key'],'PresharedKey = '+c['psk'],
                       'AllowedIPs = 10.66.0.%s/32, fd66:6a31::%x/128' % (c['ip'],c['ip'])]
-        atomic(RUN/'wg0.conf', '\n'.join(lines)+'\n')
-        command(['wg','syncconf','wg0',str(RUN/'wg0.conf')])
-        command(['ip','address','replace','10.66.0.1/24','dev','wg0'])
-        command(['ip','-6','address','replace','fd66:6a31::1/64','dev','wg0'])
-        command(['ip','link','set','wg0','mtu',str(WG_MTU),'up'])
+        conf='\n'.join(lines)+'\n'
+        if not applied('wg',conf):
+            atomic(RUN/'wg0.conf', conf)
+            command(['wg','syncconf','wg0',str(RUN/'wg0.conf')])
+            command(['ip','address','replace','10.66.0.1/24','dev','wg0'])
+            command(['ip','-6','address','replace','fd66:6a31::1/64','dev','wg0'])
+            command(['ip','link','set','wg0','mtu',str(WG_MTU),'up'])
+            applied_set('wg',conf)
         uplink=firewall()
         atomic(RUN/'vpn-summary', 'WG: UDP %s / %s clientes\n' % (v['port'],len(v['clients'])))
         RUNTIME['vpn']='Activo: UDP %s%s' % (v['port'], '' if uplink else ' (sin enlace a Internet)')
@@ -534,12 +549,12 @@ def ssh_rules(c, nets):
         # a fixed IP shows up as /32 too: only the J1 itself, so left out
         for n in dict.fromkeys(str(n.network) for n in nets if n.network.prefixlen<32):r.append(['!','-i','wg0','-s',n,'-j','ACCEPT'])
     return r+[['-j','DROP']]
-def ssh_firewall(call):
+def ssh_firewall(call,rules):
     call('-N','J1_SSH',check=False)
     if call('-C','INPUT','-p','tcp','--dport','22','-j','J1_SSH',check=False):call('-I','INPUT','1','-p','tcp','--dport','22','-j','J1_SSH')
     # flushed chain = accept for a moment, never a drop of the open sessions
     call('-F','J1_SSH')
-    for r in ssh_rules(ssh_conf(),lan_nets() if ssh_conf()['lan'] else []):call('-A','J1_SSH',*r)
+    for r in rules:call('-A','J1_SSH',*r)
 def ssh_set(**kw):
     raw=load('ssh.json',{});raw.update({k:bool(v) for k,v in kw.items()});save('ssh.json',raw);c=ssh_conf()
     log('SSH: USB'+''.join(' + '+n for n,k in (('red local','lan'),('VPN','vpn')) if c[k]))
@@ -664,7 +679,7 @@ def page(message='',error=False):
                    '<form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar</button></form></li>')
     out+=['</ul><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor. En pausa no puede conectarse, pero conserva su perfil: al reanudarlo vuelve a funcionar sin importarlo de nuevo. ↓ es lo que ha recibido el cliente; ↑, lo que ha enviado.</small></p></section>']
     checked=' checked' if cf.get('enabled') else ''
-    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+notify_section()+https_section()+ssh_section()+backup_section()+update_section()+'</main></div><script src="/j1.js" defer></script><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p></footer></html>']
+    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+notify_section()+https_section()+ssh_section()+watch_section()+backup_section()+update_section()+'</main></div><script src="/j1.js" defer></script><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p></footer></html>']
     return with_icons(''.join(out)).encode()
 
 # ---- web panel: on/off and who may reach it (set from the screen) ----
@@ -876,6 +891,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 v=f.get('limit','');v=(int(v) if v.isdigit() else -1) if f.get('on')=='1' else 0
                 bat_limit_save(v);message='Carga limitada al %d %%.'%v if v else 'Sin límite de carga.'
             elif action=='sshoff':ssh_disable();message='SSH desactivado.'
+            elif action=='watch':
+                h=f.get('hour','');m=f.get('min','');sc=f.get('sched','')
+                watch_save(vpn=f.get('vpn')=='1',net=f.get('net')=='1',reboot=f.get('reboot')=='1',min=int(m) if m.isdigit() else -1,
+                           sched=int(sc) if sc.isdigit() else -1,hour=int(h) if h.isdigit() else -1)
+                message='Vigilantes guardados.'
             elif action=='sshnet':ssh_set(lan=f.get('lan')=='1',vpn=f.get('vpn')=='1');message='Acceso SSH guardado.'
             elif action=='notify':
                 notify_save(enabled=f.get('enabled')=='1',server=f.get('server',''),events=[k for k,_ in NOTIFY_EVENTS if f.get('ev_'+k)=='1'],token=f.get('token',''),topic=f.get('topic'))
@@ -1618,7 +1638,7 @@ def ui_sys(arg):
         s.label('RAM libre: %d / %d MB'%(mem.get('MemAvailable',mem.get('MemFree',0))//1024,mem['MemTotal']//1024))
     except (OSError,KeyError,ValueError):pass
     s.label('Kernel '+os.uname().release,'m').small(BRAND,'m').small(REPO,'m')
-    s.button('nav:update','Actualizar','i','update').small('Copia de seguridad: desde el panel web.','m')
+    s.button('nav:watch','Vigilantes y reinicio','i','vpn').button('nav:update','Actualizar','i','update').small('Copia de seguridad: desde el panel web.','m')
     return s.button('nav:reboot','Reiniciar J1','d','power').button('nav:poweroff','Apagar J1','d','power')
 
 # speed test through whatever link has the route (cable or Wi-Fi), in the background
@@ -1752,6 +1772,14 @@ def ui_action(a, f):
         https_set(arg=='1');return 'panel','HTTPS '+('activado' if arg=='1' else 'desactivado')
     if verb=='panel.pw':panel_password_set(f.get('pw',''),f.get('pw2',''));return 'panel','Contraseña del panel cambiada'
     if verb=='panel.pwreset':panel_password_reset();return 'panel','El panel vuelve a usar la clave de la red'
+    if verb in ('watch.vpn','watch.net','watch.reboot'):
+        if arg not in ('0','1'):raise ValueError('Opción no válida')
+        watch_save(**{verb[6:]:arg=='1'});return 'watch',None
+    if verb=='watch.min':m=watch_conf()['min'];watch_save(min=WATCH_MIN[(WATCH_MIN.index(m)+1)%len(WATCH_MIN)]);return 'watch',None
+    if verb=='watch.sched':
+        k=[v for v,_ in WATCH_SCHED];i=k.index(watch_conf()['sched']);watch_save(sched=k[(i+1)%len(k)]);return 'watch',None
+    if verb=='watch.hour':
+        h=f.get('hour','').strip();watch_save(hour=int(h) if h.isdigit() else -1);return 'watch','Hora guardada'
     if verb in ('ssh.lan','ssh.vpn'):
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         k=verb[4:];ssh_set(**{k:arg=='1'})
@@ -2001,7 +2029,9 @@ def notify_watch():
             notify('client','J1: '+c['name']+' conectado','Se ha conectado a la VPN.',('closed_lock_with_key',),2)
     WATCH['clients']=on
     if WATCH['boot'] and has_uplink():
-        WATCH['boot']=False;notify('power','J1: encendido','El J1 se ha encendido o reiniciado y ya tiene Internet.',('arrows_counterclockwise',))
+        note=load('watch.json',{}).pop('note',None)
+        if note:watch_save(note=None)
+        WATCH['boot']=False;notify('power','J1: encendido','El J1 se ha encendido o reiniciado'+(' ('+str(note)+')' if note else '')+' y ya tiene Internet.',('arrows_counterclockwise',))
 def notify_ip(public):
     # public IPv4 of home, from the DNS update; only a change is told
     if RUNTIME.get('ip4') and RUNTIME['ip4']!=public:
@@ -2245,6 +2275,135 @@ def update_section():
 
 UI_SCREENS.update(notify=ui_notify,update=ui_update)   # defined after the table
 
+# ---- watchdogs (configurable, on by default; looked at once a minute) ----
+# vpn:   WireGuard must answer with its port and clients; if not it is set up
+#        again and, failing that, the interface is made anew.
+# net:   no Internet for `min` minutes -> the network is restarted; still none
+#        after as long again -> the J1 reboots. Never in the first 30 min after
+#        boot and at most once every 6 h, so a cut at home does not loop it;
+#        only once the J1 has had Internet or has a network to use.
+# sched: planned reboot every day or every Sunday at a set hour.
+WATCH_MIN=(5,10,15,30,60)
+WATCH_SCHED=((0,'Desactivado'),(1,'Cada día'),(7,'Cada semana (domingo)'))
+WATCH_REBOOT_GAP=6*3600
+WSTATE={'net_bad':None,'net_step':0,'net_seen':False,'last':''}
+def watch_conf():
+    c=load('watch.json',{})
+    num=lambda k:c.get(k) if isinstance(c.get(k),(int,float)) and not isinstance(c.get(k),bool) else 0
+    return {'vpn':c.get('vpn') is not False,'net':c.get('net') is not False,'reboot':c.get('reboot') is not False,
+            'min':c['min'] if c.get('min') in WATCH_MIN else 10,'sched':c['sched'] if c.get('sched') in dict(WATCH_SCHED) else 0,
+            'hour':c['hour'] if isinstance(c.get('hour'),int) and 0<=c['hour']<=23 else 4,'last_reboot':num('last_reboot')}
+def watch_save(**kw):
+    if 'min' in kw and kw['min'] not in WATCH_MIN:raise ValueError('Tiempo no válido')
+    if 'sched' in kw and kw['sched'] not in dict(WATCH_SCHED):raise ValueError('Opción no válida')
+    if 'hour' in kw and not (isinstance(kw['hour'],int) and 0<=kw['hour']<=23):raise ValueError('Hora no válida: de 0 a 23')
+    raw=load('watch.json',{});raw.update(kw);save('watch.json',raw)
+def watch_did(text):
+    WSTATE['last']=time.strftime('%d/%m %H:%M')+' · '+text;log('Vigilante: '+text)
+def uptime():
+    try:return float(Path('/proc/uptime').read_text().split()[0])
+    except (OSError,ValueError):return 0.0
+def internet_ok():
+    # TCP to two public services: no process started, 3 s at most each
+    for addr in (('1.1.1.1',443),('8.8.8.8',53)):
+        try:
+            with socket.create_connection(addr,timeout=3):return True
+        except OSError:pass
+    return False
+def vpn_problem():
+    v=ensure_vpn_state();dev=Path('/sys/class/net/wg0')
+    if not dev.exists():return 'no existe la interfaz'
+    try:
+        if not int((dev/'flags').read_text(),16)&1:return 'interfaz parada'
+    except (OSError,ValueError):return 'interfaz ilegible'
+    try:rows=[l.split('\t') for l in command(['wg','show','wg0','dump'],timeout=5).splitlines()]
+    except (RuntimeError,OSError,subprocess.SubprocessError):return 'no responde'
+    if not rows or rows[0][2:3]!=[str(v['port'])]:return 'puerto distinto'
+    if {r[0] for r in rows[1:]}!={c['public_key'] for c in v['clients'] if not c.get('paused')}:return 'clientes distintos'
+    return None
+def vpn_watch():
+    p=vpn_problem()
+    if not p:WSTATE['vpn_fail']=False;return
+    with LOCK:
+        APPLIED.clear()
+        try:apply_vpn()
+        except Exception:pass
+        if vpn_problem():
+            # a second try with a new interface (clients reconnect by themselves)
+            subprocess.run(['ip','link','del','wg0'],capture_output=True,timeout=10)
+            try:apply_vpn()
+            except Exception:pass
+    left=vpn_problem()
+    if left and WSTATE.get('vpn_fail'):return   # still broken: told already, keeps trying quietly
+    WSTATE['vpn_fail']=bool(left)
+    watch_did('WireGuard '+p+(': reiniciado' if not left else ': sigue fallando ('+left+')'))
+    notify('vpn','J1: WireGuard reiniciado' if not left else 'J1: WireGuard no se recupera',
+           'El vigilante lo ha encontrado así: '+p+'.'+('' if not left else ' Sigue mal: '+left+'.'),('wrench',),3 if not left else 5)
+def net_configured():
+    try:wifi='network=' in (STATE/'wifi.conf').read_text() and not (STATE/'wifi-off').exists()
+    except OSError:wifi=False
+    return wifi or any(Path('/sys/class/net').glob('eth*')) or any(Path('/sys/class/net').glob('usb*'))
+def net_restart():
+    # j1-network drops every address and sets them again; a link bounce
+    # wakes up a USB adapter that stopped receiving
+    (RUN/'ip-reconfigure').write_text('1\n');(RUN/'wifi-reconfigure').write_text('1\n')
+    for d in list(Path('/sys/class/net').glob('eth*'))+list(Path('/sys/class/net').glob('usb*')):
+        subprocess.run(['ip','link','set',d.name,'down'],capture_output=True,timeout=10)
+def net_watch(c):
+    now=time.monotonic()
+    if internet_ok():
+        if WSTATE['net_step']:
+            mins=int((now-WSTATE['net_bad'])//60)
+            watch_did('Internet ha vuelto tras %d min'%mins)
+            notify('vpn','J1: Internet ha vuelto','Estuvo %d min sin Internet; el vigilante reinició la red.'%mins,('white_check_mark',))
+        WSTATE.update(net_bad=None,net_step=0,net_seen=True);return
+    if not (WSTATE['net_seen'] or net_configured()):return   # nothing set up yet (first setup)
+    if WSTATE['net_bad'] is None:WSTATE['net_bad']=now;return
+    gone=now-WSTATE['net_bad']
+    if WSTATE['net_step']==0 and gone>=c['min']*60:
+        WSTATE['net_step']=1;watch_did('%d min sin Internet: se reinicia la red'%c['min']);net_restart()
+    elif WSTATE['net_step']==1 and c['reboot'] and gone>=2*c['min']*60 and uptime()>=1800 and abs(time.time()-c['last_reboot'])>=WATCH_REBOOT_GAP:
+        WSTATE['net_step']=2;watch_save(last_reboot=time.time(),note='%d min sin Internet'%(gone//60))
+        watch_did('sigue sin Internet: se reinicia el J1');reboot_soon()
+def sched_watch(c):
+    if not c['sched'] or time.time()<1.7e9:return   # clock not set yet
+    t=time.localtime()
+    if t.tm_hour!=c['hour'] or t.tm_min>=15 or (c['sched']==7 and t.tm_wday!=6):return
+    if uptime()<3600:return   # this hour's reboot is done (or the J1 just started)
+    watch_save(note='reinicio programado');watch_did('reinicio programado');reboot_soon()
+def watch_tick():
+    c=watch_conf()
+    if c['vpn'] and not RUNTIME['vpn'].startswith('Iniciando'):vpn_watch()
+    if c['net']:net_watch(c)
+    sched_watch(c)
+def watch_section():
+    c=watch_conf()
+    opt=lambda items,cur:''.join('<option value=%s%s>%s</option>'%(v,' selected' if v==cur else '',esc(t)) for v,t in items)
+    ck=lambda k:' checked' if c[k] else ''
+    return ('<section id=vigilantes><h2>Vigilantes y reinicio</h2>'+('<p>Última actuación: '+esc(WSTATE['last'])+'</p>' if WSTATE['last'] else '<p class=muted>Sin actuaciones desde que arrancó el panel.</p>')+
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=watch>'
+        '<label><input type=checkbox name=vpn value=1'+ck('vpn')+'> Vigilar WireGuard</label><small>Cada minuto comprueba que responde con su puerto y sus clientes; si no, lo reinicia.</small>'
+        '<label><input type=checkbox name=net value=1'+ck('net')+'> Vigilar la conexión a Internet</label>'
+        '<label>Sin Internet durante<select name=min>'+opt([(m,'%d min'%m) for m in WATCH_MIN],c['min'])+'</select></label><small>reinicia la red (Wi-Fi y cable).</small>'
+        '<label><input type=checkbox name=reboot value=1'+ck('reboot')+'> Si sigue sin Internet otro tanto, reiniciar el J1</label><small>Nunca en la primera media hora tras arrancar y como mucho una vez cada 6 horas.</small>'
+        '<h3>Reinicio programado</h3><label>Reiniciar<select name=sched>'+opt(WATCH_SCHED,c['sched'])+'</select></label>'
+        '<label>A las (hora, 0 a 23)<input type=number name=hour min=0 max=23 value=%d></label>'%c['hour']+
+        '<small>Un minuto sin VPN. Útil si el J1 va a estar lejos.</small><br><button>Guardar vigilantes</button></form></section>')
+def ui_watch(arg):
+    c=watch_conf();s=Screen('watch','Vigilantes','nav:sys',10)
+    s.toggle('watch.vpn:0' if c['vpn'] else 'watch.vpn:1','Vigilar WireGuard',c['vpn'])
+    s.small('Cada minuto; si no responde, lo reinicia.','m')
+    s.toggle('watch.net:0' if c['net'] else 'watch.net:1','Vigilar Internet',c['net'])
+    if c['net']:
+        s.button('watch.min','Sin Internet %d min: reiniciar la red'%c['min'],'i')
+        s.toggle('watch.reboot:0' if c['reboot'] else 'watch.reboot:1','Si no vuelve, reiniciar el J1',c['reboot'])
+        s.small('Tras otros %d min. Como mucho una vez cada 6 h.'%c['min'],'m')
+    s.gap().label('Reinicio programado:').button('watch.sched',dict(WATCH_SCHED)[c['sched']],'i')
+    if c['sched']:s.field('hour','Hora (0 a 23)',c['hour'],'n').button('watch.hour','Guardar hora','p')
+    if WSTATE['last']:s.gap().small('Última: '+WSTATE['last'],'y')
+    return s
+UI_SCREENS.update(watch=ui_watch)
+
 def has_uplink():
     try:return bool(command(['ip','-4','route','show','default']))
     except (RuntimeError,OSError,subprocess.SubprocessError):return False
@@ -2256,6 +2415,8 @@ def worker():
             bat_limit_apply();bat_sample()
             try:notify_watch()
             except Exception as e:log('Avisos: error '+type(e).__name__)
+            try:watch_tick()
+            except Exception as e:log('Vigilante: error '+type(e).__name__)
             next_bat=time.monotonic()+60
         if (time.monotonic()>=next_upnp or (RUN/'upnp-request').exists()) and has_uplink():
             (RUN/'upnp-request').unlink(missing_ok=True)

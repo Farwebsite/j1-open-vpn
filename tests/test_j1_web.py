@@ -4,6 +4,7 @@ spec=importlib.util.spec_from_file_location('j1web',pathlib.Path(__file__).resol
 class Tests(unittest.TestCase):
  def setUp(self):
   self.tmp=tempfile.TemporaryDirectory();self.old=(app.STATE,app.RUN);app.STATE=pathlib.Path(self.tmp.name)/'state';app.RUN=pathlib.Path(self.tmp.name)/'run';app.STATE.mkdir();app.RUN.mkdir()
+  app.APPLIED.clear();app.WSTATE.update(net_bad=None,net_step=0,net_seen=False,last='',vpn_fail=False)
  def tearDown(self):app.STATE,app.RUN=self.old;self.tmp.cleanup()
  def test_wifi_config_escapes_and_persists(self):
   app.wifi_save({'ssid':'a"b\\c','password':'safe"pass\\word'})
@@ -577,4 +578,71 @@ class Tests(unittest.TestCase):
   self.assertIn(['-A','J1_SSH','-i','wg0','-s','10.66.0.0/24','-j','ACCEPT'],calls);self.assertEqual(calls[-1],['-A','J1_SSH','-j','DROP'])
   self.vpn0()
   with patch.object(app,'lan_ips',return_value=['192.168.1.40']):self.assertIn('root@10.66.0.1</code> (VPN)',app.ssh_section())
+ def test_watch_settings_screen_and_form(self):
+  c=app.watch_conf();self.assertEqual((c['vpn'],c['net'],c['reboot'],c['min'],c['sched'],c['hour']),(True,True,True,10,0,4))
+  out=app.ui_request(b'a=watch.min&s=watch').decode('cp437');self.assertIn('Sin Internet 15 min',out)
+  app.ui_request(b'a=watch.reboot%3A0&s=watch');self.assertFalse(app.watch_conf()['reboot'])
+  out=app.ui_request(b'a=watch.sched&s=watch').decode('cp437');self.assertIn('Cada día',out);self.assertIn('F\thour',out)
+  self.assertIn('Hora guardada',app.ui_request(b'a=watch.hour&s=watch&f_hour=5').decode('cp437'));self.assertEqual(app.watch_conf()['hour'],5)
+  self.assertIn(b'\te\n',app.ui_request(b'a=watch.hour&s=watch&f_hour=24'));self.assertIn(b'\te\n',app.ui_request(b'a=watch.vpn%3A2&s=watch'))
+  self.assertRaises(ValueError,app.watch_save,min=7)
+  self.vpn0();page=app.page().decode();self.assertIn('id=vigilantes',page);self.assertIn('href="#vigilantes"',page)
+  self.assertIn('Vigilantes y reinicio',app.ui_request(b'a=nav:sys&s=sys').decode('cp437'))
+ def test_net_watch_restarts_then_reboots_once(self):
+  c=app.watch_conf();t=[1000.0];acts=[]
+  with patch.object(app,'internet_ok',return_value=False),patch.object(app.time,'monotonic',lambda:t[0]),\
+       patch.object(app,'net_configured',return_value=True),patch.object(app,'net_restart',lambda:acts.append('red')),\
+       patch.object(app,'reboot_soon',lambda:acts.append('reinicio')),patch.object(app,'uptime',return_value=7200),patch.object(app,'notify'):
+   app.net_watch(c);t[0]+=599;app.net_watch(c);self.assertEqual(acts,[])
+   t[0]+=1;app.net_watch(c);self.assertEqual(acts,['red'])
+   t[0]+=599;app.net_watch(c);self.assertEqual(acts,['red'])
+   t[0]+=1;app.net_watch(app.watch_conf());self.assertEqual(acts,['red','reinicio'])
+   self.assertIn('min sin Internet',app.load('watch.json',{})['note'])
+   # restarted panel, same 6 h: no second reboot
+   app.WSTATE.update(net_bad=None,net_step=0);t[0]+=10;app.net_watch(app.watch_conf());t[0]+=1300;app.net_watch(app.watch_conf());t[0]+=60;app.net_watch(app.watch_conf())
+   self.assertEqual(acts,['red','reinicio','red'])
+  with patch.object(app,'internet_ok',return_value=True),patch.object(app.time,'monotonic',lambda:t[0]),patch.object(app,'notify') as n:
+   app.net_watch(c);self.assertEqual(app.WSTATE['net_step'],0);self.assertIn('Internet ha vuelto',app.WSTATE['last']);n.assert_called_once()
+ def test_net_watch_waits_for_a_network(self):
+  t=[0.0];acts=[]
+  with patch.object(app,'internet_ok',return_value=False),patch.object(app.time,'monotonic',lambda:t[0]),\
+       patch.object(app,'net_configured',return_value=False),patch.object(app,'net_restart',lambda:acts.append('red')):
+   for _ in range(30):t[0]+=60;app.net_watch(app.watch_conf())
+  self.assertEqual(acts,[])   # first setup: no Wi-Fi, no cable, never had Internet
+ def test_vpn_watch_repairs_and_tells_once(self):
+  seq=['no responde',None];calls=[]
+  with patch.object(app,'vpn_problem',side_effect=lambda:seq.pop(0) if seq else None),patch.object(app,'apply_vpn',lambda:calls.append('apply')),\
+       patch.object(app,'notify') as n,patch.object(app.subprocess,'run') as run:
+   app.vpn_watch()
+  self.assertEqual(calls,['apply']);run.assert_not_called();self.assertIn('reiniciado',app.WSTATE['last']);n.assert_called_once()
+  with patch.object(app,'vpn_problem',return_value='no responde'),patch.object(app,'apply_vpn'),patch.object(app,'notify') as n,patch.object(app.subprocess,'run') as run:
+   app.vpn_watch();app.vpn_watch()
+  self.assertEqual(n.call_count,1);self.assertEqual(run.call_args.args[0],['ip','link','del','wg0'])
+ def test_vpn_problem(self):
+  app.save('vpn.json',{'port':51820,'endpoint':'','private_key':'K','public_key':'P','clients':[{'id':'a','ip':2,'public_key':'A','psk':'x'},{'id':'b','ip':3,'public_key':'B','psk':'y','paused':True}]})
+  d=pathlib.Path(self.tmp.name)/'wg0';d.mkdir();(d/'flags').write_text('0x1091\n')
+  real=app.Path
+  with patch.object(app,'Path',lambda x,*a:d if x=='/sys/class/net/wg0' else real(x,*a)):
+   with patch.object(app,'command',return_value='K\tP\t51820\toff\nA\tpsk\t1.2.3.4:5\t10.66.0.2/32\t0\t0\t0\toff'):self.assertIsNone(app.vpn_problem())
+   with patch.object(app,'command',return_value='K\tP\t53\toff\nA\tpsk\t1.2.3.4:5\t10.66.0.2/32\t0\t0\t0\toff'):self.assertEqual(app.vpn_problem(),'puerto distinto')
+   with patch.object(app,'command',return_value='K\tP\t51820\toff'):self.assertEqual(app.vpn_problem(),'clientes distintos')
+   with patch.object(app,'command',side_effect=app.subprocess.TimeoutExpired('wg',5)):self.assertEqual(app.vpn_problem(),'no responde')
+   (d/'flags').write_text('0x1090\n');self.assertEqual(app.vpn_problem(),'interfaz parada')
+ def test_sched_reboot(self):
+  app.watch_save(sched=7,hour=4);acts=[]
+  sunday=app.time.struct_time((2026,11,15,4,3,0,6,319,0));monday=app.time.struct_time((2026,11,16,4,3,0,0,320,0))
+  with patch.object(app,'reboot_soon',lambda:acts.append(1)),patch.object(app.time,'time',return_value=1.8e9):
+   with patch.object(app.time,'localtime',return_value=monday),patch.object(app,'uptime',return_value=90000):app.sched_watch(app.watch_conf())
+   self.assertEqual(acts,[])
+   with patch.object(app.time,'localtime',return_value=sunday),patch.object(app,'uptime',return_value=600):app.sched_watch(app.watch_conf())
+   self.assertEqual(acts,[])   # just rebooted
+   with patch.object(app.time,'localtime',return_value=sunday),patch.object(app,'uptime',return_value=90000):app.sched_watch(app.watch_conf())
+   self.assertEqual(acts,[1]);self.assertEqual(app.load('watch.json',{})['note'],'reinicio programado')
+ def test_apply_unchanged_skips_iptables(self):
+  calls=[]
+  def run(cmd,**k):calls.append(cmd);return type('R',(),{'returncode':0})()
+  with patch.object(app.subprocess,'run',side_effect=run),patch.object(app,'command',return_value='default via 10.0.0.1 dev eth0'),patch.object(app,'Path'):
+   app.firewall();n=len(calls);self.assertGreater(n,5)
+   app.firewall();self.assertEqual(len(calls),n)   # same rules: nothing run
+   app.APPLIED['fw_at']-=app.REAPPLY+1;app.firewall();self.assertEqual(len(calls),2*n)   # written again after 5 min
 if __name__=='__main__':unittest.main(verbosity=2)
