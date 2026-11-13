@@ -98,9 +98,15 @@ while :; do
   if [ -n "$y_forced" ]; then
    y_forced=; echo 0 >$P/j1_mode; log 'USB: cable en Y desconectado, modo automático'
   fi
+ elif [ -f /etc/j1/usb-ycable ] && [ -z "$y_forced" ]; then
+  # option on: fix host mode right away, before the chip can switch it off.
+  # With host already on this changes nothing in the driver; switching host
+  # off and on with the adapter plugged in can leave the adapter stalled
+  mode=0; read -r mode 2>/dev/null <$P/j1_mode
+  if [ "$mode" = 0 ]; then y_forced=1; echo 1 >$P/j1_mode; log 'USB: cable en Y, modo host fijo'; fi
  elif [ "$host" = 1 ] && [ -e /sys/bus/usb/devices/1-1 ]; then
   y_cable=1
- elif { [ -n "$y_cable" ] || [ -f /etc/j1/usb-ycable ]; } && [ "$host" = 0 ] && [ -z "$y_forced" ]; then
+ elif [ -n "$y_cable" ] && [ "$host" = 0 ] && [ -z "$y_forced" ]; then
   mode=0; read -r mode 2>/dev/null <$P/j1_mode
   if [ "$mode" = 0 ]; then
    y_forced=1; echo 1 >$P/j1_mode; log 'USB: el cable en Y se ve como cargador, mantengo el adaptador'
