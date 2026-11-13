@@ -70,6 +70,20 @@ while :; do
   echo 4 >/sys/bus/i2c/devices/3-0049/SM5701_core 2>/dev/null
  fi
  last_host=$host
+ # OTG Y cable / powered hub: the adapter can power up before the host port and
+ # is then never seen. Restart host mode once per plug-in, only while nothing
+ # is on the port (with a device on it a restart can wedge dwc_otg)
+ if [ "$host" = 1 ] && [ ! -e /sys/bus/usb/devices/1-1 ]; then
+  [ -n "$host_since" ] || host_since=$now
+  if [ -z "$host_kicked" ] && [ $((now - host_since)) -ge 20 ]; then
+   host_kicked=1; mode=0; read -r mode 2>/dev/null <$P/j1_mode
+   log 'USB: el adaptador no aparece, reinicio el puerto'
+   echo 2 >$P/j1_mode; sleep 1; echo "$mode" >$P/j1_mode
+  fi
+ else
+  host_since=
+  [ "$host" = 1 ] || host_kicked=
+ fi
  # the cable holds the shared address: Wi-Fi client in standby
  standby=
  if [ -n "$shared" ]; then
