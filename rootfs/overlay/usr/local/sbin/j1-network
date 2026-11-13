@@ -34,6 +34,8 @@ hold_cable=
 # whenever host mode ends.
 P=/sys/module/dwc_otg/parameters
 last_host=unknown
+# host mode forced for a Y cable by a previous instance (restart without reboot)
+y_forced=; read -r y_forced 2>/dev/null <$P/j1_mode; [ "$y_forced" = 1 ] || y_forced=
 # fixed address from /etc/j1/ip-*.conf (written by web.py), applied through
 # the same udhcpc script as a DHCP lease
 ipstatic() {
@@ -83,6 +85,25 @@ while :; do
  else
   host_since=
   [ "$host" = 1 ] || host_kicked=
+ fi
+ # Y cable: the MUIC may later take it for a plain charger and host mode ends
+ # with the adapter still plugged. Once an adapter has worked on external power,
+ # keep host mode (forced) until that power goes away, i.e. the cable is pulled;
+ # then back to automatic so a PC cable works as usual
+ power=0
+ for ps in ac usb; do v=0; read -r v 2>/dev/null </sys/class/power_supply/$ps/online; [ "$v" = 1 ] && power=1; done
+ if [ "$power" = 0 ]; then
+  y_cable=
+  if [ -n "$y_forced" ]; then
+   y_forced=; echo 0 >$P/j1_mode; log 'USB: cable en Y desconectado, modo automático'
+  fi
+ elif [ "$host" = 1 ] && [ -e /sys/bus/usb/devices/1-1 ]; then
+  y_cable=1
+ elif [ -n "$y_cable" ] && [ "$host" = 0 ] && [ -z "$y_forced" ]; then
+  mode=0; read -r mode 2>/dev/null <$P/j1_mode
+  if [ "$mode" = 0 ]; then
+   y_forced=1; echo 1 >$P/j1_mode; log 'USB: el cable en Y se ve como cargador, mantengo el adaptador'
+  fi
  fi
  # the cable holds the shared address: Wi-Fi client in standby
  standby=
