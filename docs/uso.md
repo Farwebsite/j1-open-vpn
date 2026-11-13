@@ -112,9 +112,8 @@ Mientras el adaptador está conectado, el J1 **no se carga** (el puerto USB lo e
 
 Con un **cable OTG en Y** (probado con un cargador de 2 A) el J1 se carga y usa el cable a la vez. Si lo vas a dejar siempre conectado, activa **Cable en Y siempre conectado** en *Cable USB* (panel web o pantalla del J1):
 
-- Ese cable a veces se detecta como un simple cargador, al arrancar o más tarde, y el J1 apagaría el adaptador. Con la opción activada, mientras le llegue corriente por el USB, el J1 lo mantiene.
-- Sin la opción, el J1 también lo mantiene si ya lo había visto funcionar, pero no cubre el arranque.
-- Al desconectar el cable en Y vuelve al modo automático. **Desactiva la opción para conectar el J1 al PC por USB.**
+- Ese cable a veces se detecta como un simple cargador, al arrancar o más tarde, y el J1 apagaría el adaptador. Con la opción activada, el puerto USB queda en modo adaptador desde el primer segundo del arranque y no cambia mientras el J1 está encendido.
+- **Para conectar el J1 al PC por USB:** desconecta el adaptador y desactiva la opción.
 - A veces el adaptador se enciende antes que el puerto USB del J1 y no aparece: si a los 20 segundos sigue sin verse, el J1 reinicia el puerto una vez él solo. Si aun así no aparece, desconecta el cable en Y del J1, espera 5 segundos y vuelve a conectarlo.
 
 ### Misma IP por cable y Wi-Fi (un solo puerto en el router)
