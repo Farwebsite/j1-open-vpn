@@ -497,9 +497,17 @@ def dns_settings(enabled, domain, zone, token, enabled6=None, domain6=None):
         RUNTIME['ddns6']='Pendiente de actualizar' if enabled6 else 'Desactivado'
         RUNTIME['ddns']='Pendiente de actualizar' if enabled else 'Desactivado';atomic(RUN/'ddns-request','1\n')
 
-def usb_set(boost):
-    with LOCK:save('usb.json',{'boost':boost});apply_usb()
-    log('Alimentacion USB: '+('automatica' if boost else 'solo externa'))
+def usb_set(boost=None, ycable=None):
+    # ycable: an OTG Y cable or powered hub stays plugged in; its chip may take
+    # it for a plain charger, so j1-network keeps host mode while it powers the J1
+    with LOCK:
+        c=load('usb.json',{})
+        if boost is not None:c['boost']=bool(boost)
+        if ycable is not None:c['ycable']=bool(ycable)
+        save('usb.json',c);apply_usb()
+    if boost is not None:log('Alimentacion USB: '+('automatica' if boost else 'solo externa'))
+    if ycable is not None:log('Cable en Y: '+('mantener el adaptador' if ycable else 'detección automática'))
+def usb_ycable():return load('usb.json',{}).get('ycable') is True
 
 USB_PARAMS = Path('/sys/module/dwc_otg/parameters')
 def usb_param(name):
@@ -509,6 +517,12 @@ def apply_usb():
     # kernel j1otg: j1_boost 1 = automatic 5 V for an unpowered adapter,
     # 0 = never. Without a saved choice the kernel default stays.
     s=load('usb.json',{})
+    # j1-network reads the Y cable choice from this file
+    flag=STATE/'usb-ycable'
+    try:
+        if s.get('ycable') is True:flag.touch()
+        else:flag.unlink(missing_ok=True)
+    except OSError:pass
     if 'boost' not in s:return
     try:(USB_PARAMS/'j1_boost').write_text(('1' if s['boost'] else '0')+'\n')
     except OSError:pass
@@ -531,7 +545,10 @@ def usb_section():
         '<small>Activado: si el adaptador llega sin corriente, el J1 espera 2 s, comprueba que nadie más alimenta el cable '
         'y entonces da 5 V; los corta si aparece otra fuente. Con un hub o cable OTG con alimentación, el J1 no da 5 V y se carga desde ahí. '
         'Desactivado: el J1 no da 5 V nunca. El cable tiene prioridad sobre la Wi-Fi para Internet y la VPN.</small><br>'
-        '<button>Guardar alimentación USB</button></form></section>')
+        '<label><input type=checkbox name=ycable value=1'+(' checked' if usb_ycable() else '')+'> Cable OTG en Y o hub con alimentación, siempre conectado</label>'
+        '<small>Ese cable a veces se detecta como un cargador y el J1 apagaría el adaptador. Activado: mientras le llegue corriente por el USB, el J1 mantiene el adaptador. '
+        'Desactívalo para conectar el J1 al PC por USB.</small><br>'
+        '<button>Guardar cable USB</button></form></section>')
 
 # ---- SSH (optional): keys only; /root/.ssh/authorized_keys links to this
 # file, which lives with the configuration (it survives a system reinstall).
@@ -864,8 +881,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             elif action=='wifi':wifi_save(f);message='Red guardada. Espera unos segundos y recarga para ver el estado.'
             elif action=='client':client_create(f.get('name',''));message='Cliente creado. Descarga su perfil .conf.'
             elif action=='usb':
-                boost=f.get('boost')=='1';usb_set(boost)
-                message='Alimentación USB guardada: '+('automática.' if boost else 'el J1 no dará 5 V.')
+                boost=f.get('boost')=='1';usb_set(boost,f.get('ycable')=='1')
+                message='Cable USB guardado: '+('alimentación automática' if boost else 'el J1 no dará 5 V')+(', cable en Y.' if f.get('ycable')=='1' else '.')
             elif action=='delete':client_delete(f.get('id',''));message='Cliente revocado.'
             elif action=='pause':client_pause(f.get('id',''),f.get('on')=='1');message='Cliente '+('en pausa: no puede conectarse.' if f.get('on')=='1' else 'reanudado.')
             elif action=='vpn':
@@ -1612,6 +1629,8 @@ def ui_usb(arg):
     if usb_param('j1_boost_locked')=='1':s.small('5 V bloqueados hasta reconectar el OTG (%s intentos).'%(usb_param('j1_boost_tries') or '0'),'y')
     on=usb_param('j1_boost')=='1'
     s.toggle('usb.off' if on else 'usb.on','Alimentación automática 5 V',on)
+    y=usb_ycable();s.toggle('usb.y:0' if y else 'usb.y:1','Cable en Y siempre conectado',y)
+    if y:s.small('Mantiene el adaptador con corriente externa. Quítalo para usar el cable del PC.','m')
     return s.button('nav:ip:eth','IP del cable','i','ip')
 
 def ui_logs(kind):
@@ -1838,6 +1857,9 @@ def ui_action(a, f):
         if not BRIGHT_MIN<=b<=255:raise ValueError('Brillo no válido')
         display_save(brightness=b);return 'disp',None
     if verb in ('usb.on','usb.off'):usb_set(verb=='usb.on');return 'usb','Alimentación USB guardada'
+    if verb=='usb.y':
+        if arg not in ('0','1'):raise ValueError('Opción no válida')
+        usb_set(ycable=arg=='1');return 'usb','Cable en Y '+('activado' if arg=='1' else 'desactivado')
     if verb=='sys.reboot':
         log('Reinicio pedido desde la pantalla')
         subprocess.Popen(['/bin/busybox','sh','-c','sleep 2; sync; reboot -f'],start_new_session=True)

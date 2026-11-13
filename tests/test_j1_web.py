@@ -657,4 +657,14 @@ class Tests(unittest.TestCase):
   self.vpn0();self.assertIn('Ahora desactivado',app.ssh_section())
   with patch.object(app,'apply_vpn'):app.ui_request(b'a=ssh.on%3A1&s=ssh')
   self.assertIn(['-i','rndis0','-j','ACCEPT'],app.ssh_rules(app.ssh_conf(),[]))
+ def test_usb_ycable_option(self):
+  params=pathlib.Path(self.tmp.name)/'params';params.mkdir();(params/'j1_boost').write_text('1\n')
+  with patch.object(app,'USB_PARAMS',params):
+   self.assertFalse(app.usb_ycable());self.assertIn('name=ycable value=1>',app.usb_section())
+   out=app.ui_request(b'a=usb.y%3A1&s=usb').decode('cp437')
+   self.assertIn('Cable en Y activado',out);self.assertIn('S\tusb.y:0\tCable en Y siempre conectado\t1',out)
+   self.assertTrue((app.STATE/'usb-ycable').exists());self.assertIn('name=ycable value=1 checked',app.usb_section())
+   app.usb_set(True,False);self.assertFalse((app.STATE/'usb-ycable').exists());self.assertEqual(app.load('usb.json',{}),{'boost':True,'ycable':False})
+   self.assertEqual((params/'j1_boost').read_text(),'1\n')
+   self.assertIn(b'\te\n',app.ui_request(b'a=usb.y%3A7&s=usb'))
 if __name__=='__main__':unittest.main(verbosity=2)

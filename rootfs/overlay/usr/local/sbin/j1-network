@@ -86,10 +86,11 @@ while :; do
   host_since=
   [ "$host" = 1 ] || host_kicked=
  fi
- # Y cable: the MUIC may later take it for a plain charger and host mode ends
- # with the adapter still plugged. Once an adapter has worked on external power,
- # keep host mode (forced) until that power goes away, i.e. the cable is pulled;
- # then back to automatic so a PC cable works as usual
+ # Y cable: the MUIC may take it for a plain charger (at boot or later) and
+ # host mode ends with the adapter still plugged. Once an adapter has worked on
+ # external power, or with the Y cable option on (/etc/j1/usb-ycable), keep host
+ # mode (forced) until that power goes away, i.e. the cable is pulled; then
+ # back to automatic so a PC cable works as usual
  power=0
  for ps in ac usb; do v=0; read -r v 2>/dev/null </sys/class/power_supply/$ps/online; [ "$v" = 1 ] && power=1; done
  if [ "$power" = 0 ]; then
@@ -99,7 +100,7 @@ while :; do
   fi
  elif [ "$host" = 1 ] && [ -e /sys/bus/usb/devices/1-1 ]; then
   y_cable=1
- elif [ -n "$y_cable" ] && [ "$host" = 0 ] && [ -z "$y_forced" ]; then
+ elif { [ -n "$y_cable" ] || [ -f /etc/j1/usb-ycable ]; } && [ "$host" = 0 ] && [ -z "$y_forced" ]; then
   mode=0; read -r mode 2>/dev/null <$P/j1_mode
   if [ "$mode" = 0 ]; then
    y_forced=1; echo 1 >$P/j1_mode; log 'USB: el cable en Y se ve como cargador, mantengo el adaptador'
