@@ -34,8 +34,6 @@ hold_cable=
 # whenever host mode ends.
 P=/sys/module/dwc_otg/parameters
 last_host=unknown
-# host mode forced for a Y cable by a previous instance (restart without reboot)
-y_forced=; read -r y_forced 2>/dev/null <$P/j1_mode; [ "$y_forced" = 1 ] || y_forced=
 # fixed address from /etc/j1/ip-*.conf (written by web.py), applied through
 # the same udhcpc script as a DHCP lease
 ipstatic() {
@@ -74,7 +72,8 @@ while :; do
  last_host=$host
  # OTG Y cable / powered hub: the adapter can power up before the host port and
  # is then never seen. Restart host mode once per plug-in, only while nothing
- # is on the port (with a device on it a restart can wedge dwc_otg)
+ # is on the port (with a device on it a restart can wedge dwc_otg); again
+ # after the adapter has been seen (host mode stays on with the Y cable option)
  if [ "$host" = 1 ] && [ ! -e /sys/bus/usb/devices/1-1 ]; then
   [ -n "$host_since" ] || host_since=$now
   if [ -z "$host_kicked" ] && [ $((now - host_since)) -ge 20 ]; then
@@ -83,34 +82,7 @@ while :; do
    echo 2 >$P/j1_mode; sleep 1; echo "$mode" >$P/j1_mode
   fi
  else
-  host_since=
-  [ "$host" = 1 ] || host_kicked=
- fi
- # Y cable: the MUIC may take it for a plain charger (at boot or later) and
- # host mode ends with the adapter still plugged. Once an adapter has worked on
- # external power, or with the Y cable option on (/etc/j1/usb-ycable), keep host
- # mode (forced) until that power goes away, i.e. the cable is pulled; then
- # back to automatic so a PC cable works as usual
- power=0
- for ps in ac usb; do v=0; read -r v 2>/dev/null </sys/class/power_supply/$ps/online; [ "$v" = 1 ] && power=1; done
- if [ "$power" = 0 ]; then
-  y_cable=
-  if [ -n "$y_forced" ]; then
-   y_forced=; echo 0 >$P/j1_mode; log 'USB: cable en Y desconectado, modo automático'
-  fi
- elif [ -f /etc/j1/usb-ycable ] && [ -z "$y_forced" ]; then
-  # option on: fix host mode right away, before the chip can switch it off.
-  # With host already on this changes nothing in the driver; switching host
-  # off and on with the adapter plugged in can leave the adapter stalled
-  mode=0; read -r mode 2>/dev/null <$P/j1_mode
-  if [ "$mode" = 0 ]; then y_forced=1; echo 1 >$P/j1_mode; log 'USB: cable en Y, modo host fijo'; fi
- elif [ "$host" = 1 ] && [ -e /sys/bus/usb/devices/1-1 ]; then
-  y_cable=1
- elif [ -n "$y_cable" ] && [ "$host" = 0 ] && [ -z "$y_forced" ]; then
-  mode=0; read -r mode 2>/dev/null <$P/j1_mode
-  if [ "$mode" = 0 ]; then
-   y_forced=1; echo 1 >$P/j1_mode; log 'USB: el cable en Y se ve como cargador, mantengo el adaptador'
-  fi
+  host_since=; host_kicked=
  fi
  # the cable holds the shared address: Wi-Fi client in standby
  standby=

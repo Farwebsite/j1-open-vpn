@@ -12,6 +12,12 @@ done
 : >/run/appliance.log
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" >>/run/appliance.log; }
 log 'Linux iniciado'
+# OTG Y cable always plugged in (Cable USB option): host mode fixed from the
+# start, before the cable chip can take it for a charger. Never switched while
+# running: switching with the adapter plugged in can stall it or the driver
+if [ -f /etc/j1/usb-ycable ]; then
+ echo 1 >/sys/module/dwc_otg/parameters/j1_mode 2>/dev/null && log 'USB: cable en Y, modo host fijo'
+fi
 # First boot of a fresh install: per-device secrets, plus the Wi-Fi firmware
 # and MAC address of this phone (Samsung files, never shipped in the image).
 # Read-only mounts by partition name, so nothing of Android is modified.

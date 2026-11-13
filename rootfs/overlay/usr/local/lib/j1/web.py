@@ -499,12 +499,16 @@ def dns_settings(enabled, domain, zone, token, enabled6=None, domain6=None):
 
 def usb_set(boost=None, ycable=None):
     # ycable: an OTG Y cable or powered hub stays plugged in; its chip may take
-    # it for a plain charger, so j1-network keeps host mode while it powers the J1
+    # it for a plain charger, so host mode is fixed (j1-init sets it at boot).
+    # Only switched here, when the choice changes
     with LOCK:
-        c=load('usb.json',{})
+        c=load('usb.json',{});was=c.get('ycable') is True
         if boost is not None:c['boost']=bool(boost)
         if ycable is not None:c['ycable']=bool(ycable)
         save('usb.json',c);apply_usb()
+        if ycable is not None and bool(ycable)!=was:
+            try:(USB_PARAMS/'j1_mode').write_text('1\n' if ycable else '0\n')
+            except OSError:pass
     if boost is not None:log('Alimentacion USB: '+('automatica' if boost else 'solo externa'))
     if ycable is not None:log('Cable en Y: '+('mantener el adaptador' if ycable else 'detección automática'))
 def usb_ycable():return load('usb.json',{}).get('ycable') is True
@@ -546,8 +550,8 @@ def usb_section():
         'y entonces da 5 V; los corta si aparece otra fuente. Con un hub o cable OTG con alimentación, el J1 no da 5 V y se carga desde ahí. '
         'Desactivado: el J1 no da 5 V nunca. El cable tiene prioridad sobre la Wi-Fi para Internet y la VPN.</small><br>'
         '<label><input type=checkbox name=ycable value=1'+(' checked' if usb_ycable() else '')+'> Cable OTG en Y o hub con alimentación, siempre conectado</label>'
-        '<small>Ese cable a veces se detecta como un cargador y el J1 apagaría el adaptador. Activado: mientras le llegue corriente por el USB, el J1 mantiene el adaptador. '
-        'Desactívalo para conectar el J1 al PC por USB.</small><br>'
+        '<small>Ese cable a veces se detecta como un cargador y el J1 apagaría el adaptador. Activado: el puerto USB queda siempre en modo adaptador, también al arrancar. '
+        'Para conectar el J1 al PC por USB, desconecta antes el adaptador y desactiva esta opción.</small><br>'
         '<button>Guardar cable USB</button></form></section>')
 
 # ---- SSH (optional): keys only; /root/.ssh/authorized_keys links to this
@@ -1630,7 +1634,7 @@ def ui_usb(arg):
     on=usb_param('j1_boost')=='1'
     s.toggle('usb.off' if on else 'usb.on','Alimentación automática 5 V',on)
     y=usb_ycable();s.toggle('usb.y:0' if y else 'usb.y:1','Cable en Y siempre conectado',y)
-    if y:s.small('Mantiene el adaptador con corriente externa. Quítalo para usar el cable del PC.','m')
+    if y:s.small('Puerto siempre en modo adaptador. Para usar el cable del PC, desconecta el adaptador y quita esta opción.','m')
     return s.button('nav:ip:eth','IP del cable','i','ip')
 
 def ui_logs(kind):

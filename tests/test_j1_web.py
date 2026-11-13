@@ -664,7 +664,9 @@ class Tests(unittest.TestCase):
    out=app.ui_request(b'a=usb.y%3A1&s=usb').decode('cp437')
    self.assertIn('Cable en Y activado',out);self.assertIn('S\tusb.y:0\tCable en Y siempre conectado\t1',out)
    self.assertTrue((app.STATE/'usb-ycable').exists());self.assertIn('name=ycable value=1 checked',app.usb_section())
-   app.usb_set(True,False);self.assertFalse((app.STATE/'usb-ycable').exists());self.assertEqual(app.load('usb.json',{}),{'boost':True,'ycable':False})
+   self.assertEqual((params/'j1_mode').read_text(),'1\n')   # switched once, when chosen
+   (params/'j1_mode').write_text('x');app.ui_request(b'a=usb.y%3A1&s=usb');self.assertEqual((params/'j1_mode').read_text(),'x')
+   app.usb_set(True,False);self.assertFalse((app.STATE/'usb-ycable').exists());self.assertEqual((params/'j1_mode').read_text(),'0\n');self.assertEqual(app.load('usb.json',{}),{'boost':True,'ycable':False})
    self.assertEqual((params/'j1_boost').read_text(),'1\n')
    self.assertIn(b'\te\n',app.ui_request(b'a=usb.y%3A7&s=usb'))
 if __name__=='__main__':unittest.main(verbosity=2)
