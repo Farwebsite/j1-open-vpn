@@ -110,6 +110,8 @@ Con un adaptador **USB‑Ethernet** (probado RTL8153; también CDC Ethernet, RTL
 
 Mientras el adaptador está conectado, el J1 **no se carga** (el puerto USB lo está alimentando): funciona con la batería. Para uso continuo por cable hace falta un cable OTG en Y con alimentación o un hub USB alimentado.
 
+Con un **cable OTG en Y** (probado con un cargador de 2 A) el J1 se carga y usa el cable a la vez. A veces el adaptador se enciende antes que el puerto USB del J1 y no aparece: si a los 20 segundos sigue sin verse, el J1 reinicia el puerto una vez él solo. Si aun así no aparece, desconecta el cable en Y del J1, espera 5 segundos y vuelve a conectarlo.
+
 ### Misma IP por cable y Wi-Fi (un solo puerto en el router)
 
 En **Wi-Fi → IP de la Wi-Fi** fija una IP y pulsa *Usar esta IP también en el cable*. Desde entonces:
