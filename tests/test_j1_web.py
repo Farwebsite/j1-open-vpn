@@ -240,6 +240,14 @@ class Tests(unittest.TestCase):
   self.assertIn(b'l\tJ1 Open VPN \xfa (c) 2026 Farweb\t',home);self.assertNotIn(b'appliance',home)
   menu=app.ui_request(b'a=nav%3Apower')
   for act in (b'sys.poweroff',b'sys.reboot',b'nav:home'):self.assertIn(b'B\t'+act+b'\t',menu)
+ def test_system_section_reboot_and_poweroff_with_fallback(self):
+  s=app.system_section()
+  for act in ('reboot','poweroff'):self.assertIn('name=action value='+act+'><label><input type=checkbox name=confirm value=1 required>',s)
+  self.assertIn('Kernel ',s);self.assertIn(b'href="#sistema"',app.page())
+  with patch.object(app.subprocess,'Popen') as p:app.reboot_soon();app.poweroff_soon()
+  rb,po=(c.args[0][-1] for c in p.call_args_list)
+  self.assertIn('reboot -f &',rb);self.assertIn('echo b >/proc/sysrq-trigger',rb)
+  self.assertIn('poweroff -f &',po);self.assertIn('echo o >/proc/sysrq-trigger',po)
  def test_ddns_ipv6_test_name_and_ipv4_kept(self):
   app.save('cloudflare.json',{'enabled':True,'hostname':'vpn.example.com','zone_id':'a'*32,'token':'t','enabled6':True,'hostname6':'vpn6.example.com'})
   traces=[io.BytesIO(b'ip=2a0c:5a87:5700:b000::1\n'),io.BytesIO(b'ip=203.0.113.8\n')]

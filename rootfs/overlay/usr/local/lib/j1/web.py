@@ -104,6 +104,7 @@ ICONS_SVG={
     'notify':'M384 171 427 128V107H85V128L128 171V277Q128 327 153.5 364Q179 401 224 412V427Q224 440 233 449.5Q242 459 256 459Q270 459 279 449.5Q288 440 288 427V412Q333 401 358.5 364Q384 327 384 277ZM256 43Q238 43 225.5 55Q213 67 213 85H299Q299 68 286 55.5Q273 43 256 43Z',
     'backup':'M299 235H363L256 341L149 235H213V149H299ZM413 298Q454 295 483 264.5Q512 234 512 192Q512 148 480.5 116.5Q449 85 405 85H128Q75 85 37.5 122.5Q0 160 0 213Q0 260 33.5 297.5Q67 335 114 340Q135 379 173 403Q211 427 256 427Q310 427 356.5 389Q403 351 413 298Z',
     'update':'M341 235 256 149 171 235H235V341H277V235ZM363 107V405H149V107ZM363 490Q380 490 392.5 477.5Q405 465 405 448V64Q405 47 392.5 34Q380 21 363 21H149Q132 21 119.5 34Q107 47 107 64V448Q107 465 119.5 478Q132 491 149 491Z',
+    'power':'M232 480H280V256H232ZM141 396A200 200 0 1 1 371 396L343 357A152 152 0 1 0 169 357Z',
     'https':'M322 341V384Q322 411 302.5 430.5Q283 450 256 450Q229 450 209.5 430.5Q190 411 190 384V341ZM226 162Q239 149 256 149Q273 149 286 162Q299 175 299 192Q299 209 286 222Q273 235 256 235Q239 235 226 222Q213 209 213 192Q213 175 226 162ZM384 341Q401 341 414 328.5Q427 316 427 299V85Q427 68 414 55.5Q401 43 384 43H128Q111 43 98 55.5Q85 68 85 85V299Q85 316 98 328.5Q111 341 128 341H149V384Q149 428 180.5 459.5Q212 491 256 491Q300 491 331.5 459.5Q363 428 363 384V341Z',
 }
 # ---- end of icons
@@ -111,7 +112,7 @@ ICONS_SVG={
 SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap','#64d2ff'),('bat','Batería','bat','#34c759'),('vpn','WireGuard','vpn','#ff9f0a'),('avisos','Avisos al móvil','notify','#ff375f'),
           ('dns','Cloudflare DNS','dns','#0a84ff'),('usb','Cable USB','cable','#bf5af2'),('clave','Contraseña del panel','key','#5ac8fa'),
           ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'),('vigilantes','Vigilantes','vpn','#ff453a'),
-          ('https','HTTPS','https','#30d158'),('copia','Copia de seguridad','backup','#30d158'),('actualizar','Actualizar','update','#0a84ff'))
+          ('https','HTTPS','https','#30d158'),('copia','Copia de seguridad','backup','#30d158'),('actualizar','Actualizar','update','#0a84ff'),('sistema','Sistema','power','#ff453a'))
 # moves the page dots of the phone home screen (the swipe itself is CSS)
 DOTS_JS=(b"(function(){var n=document.querySelector('nav.pages'),d=document.querySelectorAll('.dots i');if(!n||!d.length)return;"
          b"function u(){var p=Math.round(n.scrollLeft/n.clientWidth);for(var i=0;i<d.length;i++)d[i].className=i==p?'on':''}"
@@ -705,7 +706,7 @@ def page(message='',error=False):
                    '<form method=post>'+hidden()+'<input type=hidden name=action value=delete><input type=hidden name=id value="'+c['id']+'"><button class=danger>Quitar</button></form></li>')
     out+=['</ul><form method=post>'+hidden()+'<input type=hidden name=action value=client><label>Nombre del nuevo cliente<input name=name maxlength=64 required placeholder="Mi móvil"></label><button>Crear cliente</button></form><p><small>El perfil contiene claves privadas. Al quitar un cliente, su acceso se revoca en el servidor. En pausa no puede conectarse, pero conserva su perfil: al reanudarlo vuelve a funcionar sin importarlo de nuevo. ↓ es lo que ha recibido el cliente; ↑, lo que ha enviado.</small></p></section>']
     checked=' checked' if cf.get('enabled') else ''
-    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+notify_section()+https_section()+ssh_section()+watch_section()+backup_section()+update_section()+'</main></div><script src="/j1.js" defer></script><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p></footer></html>']
+    out+=['<section id=dns><h2>Cloudflare · DNS dinámico</h2><p>'+esc(RUNTIME['ddns'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=dns><label><input type=checkbox name=enabled value=1'+checked+'> Actualizar automáticamente el registro DNS</label><label>Nombre completo del registro<input name=hostname value="'+esc(cf.get('hostname',''))+'" placeholder="vpn2.tudominio.com"></label><label>ID de zona de Cloudflare<input name=zone_id value="'+esc(cf.get('zone_id',''))+'" maxlength=32></label><label>Token API<input type=password name=token autocomplete=new-password placeholder="'+('Guardado; deja vacío para conservarlo' if cf.get('token') else 'Token con permiso DNS:Editar en esta zona')+'"></label><small>El registro A se crea o actualiza en modo Solo DNS, sin proxy naranja. Revisión cada 5 minutos. No se conecta a Cloudflare hasta que actives esta opción.</small><br><button>Guardar Cloudflare</button></form></section>'+notify_section()+https_section()+ssh_section()+watch_section()+backup_section()+update_section()+system_section()+'</main></div><script src="/j1.js" defer></script><footer><p>Acceso externo: el router debe redirigir el puerto UDP al J1. El DNS dinámico no elimina CG-NAT. La VPN proporciona salida IPv4; el perfil dirige IPv6 al túnel para evitar salida directa.</p></footer></html>']
     return with_icons(''.join(out)).encode()
 
 # ---- web panel: on/off and who may reach it (set from the screen) ----
@@ -931,6 +932,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self.respond(blob,content='application/octet-stream',filename='j1-copia-'+time.strftime('%Y%m%d')+'.j1bak');return
             elif action=='restore':
                 n=backup_restore(files.get('file',b''),f.get('pw',''));message='Copia restaurada (%d archivos). El J1 se reinicia: vuelve a entrar en un minuto.'%n
+            elif action in ('reboot','poweroff'):
+                if f.get('confirm')!='1':raise ValueError('Marca la casilla para confirmar.')
+                log(('Reinicio' if action=='reboot' else 'Apagado')+' pedido desde el panel web')
+                if action=='reboot':reboot_soon();message='Reiniciando: la VPN vuelve en un minuto. Recarga esta página entonces.'
+                else:poweroff_soon();message='Apagando: para encenderlo, mantén pulsado el botón de encendido del J1.'
             elif action=='updcheck':update_look();message=UPD['state']
             elif action=='updrun':update_start();message='Actualizando: tarda unos minutos y el J1 se reinicia solo.'
             elif action=='https':
@@ -1865,12 +1871,10 @@ def ui_action(a, f):
         if arg not in ('0','1'):raise ValueError('Opción no válida')
         usb_set(ycable=arg=='1');return 'usb','Cable en Y '+('activado' if arg=='1' else 'desactivado')
     if verb=='sys.reboot':
-        log('Reinicio pedido desde la pantalla')
-        subprocess.Popen(['/bin/busybox','sh','-c','sleep 2; sync; reboot -f'],start_new_session=True)
+        log('Reinicio pedido desde la pantalla');reboot_soon()
         return 'home','Reiniciando...'
     if verb=='sys.poweroff':
-        log('Apagado pedido desde la pantalla')
-        subprocess.Popen(['/bin/busybox','sh','-c','sleep 2; sync; poweroff -f'],start_new_session=True)
+        log('Apagado pedido desde la pantalla');poweroff_soon()
         return 'home','Apagando...'
     raise ValueError('Acción no válida')
 
@@ -2189,8 +2193,27 @@ def backup_restore(blob, pw):
     log('Copia de seguridad restaurada (%d archivos): reiniciando'%len(files))
     reboot_soon()
     return len(files)
+# a driver stuck in the kernel (USB) can hang reboot -f: after 40 s the kernel
+# itself is asked (sysrq: sync, then reboot or power off)
 def reboot_soon():
-    subprocess.Popen(['/bin/busybox','sh','-c','sleep 3; sync; reboot -f'],start_new_session=True)
+    subprocess.Popen(['/bin/busybox','sh','-c','sleep 3; sync; reboot -f & sleep 40; echo 1 >/proc/sys/kernel/sysrq; echo s >/proc/sysrq-trigger; sleep 2; echo b >/proc/sysrq-trigger'],start_new_session=True)
+def poweroff_soon():
+    subprocess.Popen(['/bin/busybox','sh','-c','sleep 3; sync; poweroff -f & sleep 40; echo 1 >/proc/sys/kernel/sysrq; echo s >/proc/sysrq-trigger; sleep 2; echo o >/proc/sysrq-trigger'],start_new_session=True)
+def system_section():
+    rows=[]
+    try:
+        up=uptime();load=Path('/proc/loadavg').read_text().split()[:3]
+        mem={l.split(':')[0]:int(l.split()[1]) for l in Path('/proc/meminfo').read_text().splitlines() if l.split()[1:2]}
+        rows+=['Encendido: %dd %dh %dmin'%(up//86400,up%86400//3600,up%3600//60),'Carga: '+' '.join(load),
+               'RAM libre: %d / %d MB'%(mem.get('MemAvailable',mem.get('MemFree',0))//1024,mem['MemTotal']//1024)]
+    except (OSError,KeyError,ValueError,IndexError):pass
+    rows+=['Versión: '+(release_current() or 'de desarrollo'),'Kernel '+os.uname().release]
+    form=lambda act,label:('<form method=post>'+hidden()+'<input type=hidden name=action value='+act+'>'
+        '<label><input type=checkbox name=confirm value=1 required> Sí, '+label.lower()+' el J1</label><button class=danger>'+label+' J1</button></form>')
+    return ('<section id=sistema><h2>Sistema</h2><p>'+'<br>'.join(esc(r) for r in rows)+'</p>'+
+        '<small>La VPN y este panel se cortan mientras el J1 está apagado o reiniciándose (un minuto al reiniciar).</small>'+
+        '<h3>Reiniciar</h3>'+form('reboot','Reiniciar')+
+        '<h3>Apagar</h3><small>Para volver a encenderlo hay que pulsar el botón de encendido del J1: desde aquí no se puede.</small>'+form('poweroff','Apagar')+'</section>')
 def backup_section():
     return ('<section id=copia><h2>Copia de seguridad</h2><p class=muted>Guarda la configuración (clientes de la VPN, Wi-Fi, Cloudflare, avisos, contraseñas y claves SSH) en un archivo cifrado con una contraseña. Sirve para reinstalar o pasar a otro J1 sin volver a configurar los clientes.</p>'
         '<form method=post>'+hidden()+'<input type=hidden name=action value=backup>'
