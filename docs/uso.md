@@ -158,6 +158,10 @@ Pantalla *Sistema* → *Actualizar*, o panel web → *Actualizar*. *Buscar actua
 
 Solo se actualiza el sistema: la imagen de arranque (kernel) no se toca. Si la versión nueva trae otro kernel, el J1 lo dice; para tenerlo hay que reinstalar la imagen de arranque (ver [Instalación](instalacion.md)).
 
+## Sistema: reiniciar y apagar
+
+Panel web → *Sistema* (como el menú *Sistema* de la pantalla): tiempo encendido, carga, RAM libre, versión y kernel, y los botones **Reiniciar J1** y **Apagar J1**, cada uno con una casilla que hay que marcar para confirmar. Reiniciar deja un minuto sin VPN ni panel. Apagado, **solo se vuelve a encender con el botón de encendido del J1**. Si el reinicio o el apagado se quedan colgados 40 s (por ejemplo, con un adaptador USB atascado), el J1 los fuerza.
+
 ## Zona horaria
 
 Viene la de España peninsular. Para cambiarla:
