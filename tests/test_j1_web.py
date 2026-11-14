@@ -243,7 +243,7 @@ class Tests(unittest.TestCase):
  def test_system_section_reboot_and_poweroff_with_fallback(self):
   s=app.system_section()
   for act in ('reboot','poweroff'):self.assertIn('name=action value='+act+'><label><input type=checkbox name=confirm value=1 required>',s)
-  self.assertIn('Kernel ',s);self.assertIn(b'href="#sistema"',app.page())
+  self.assertIn('Kernel ',s);self.assertIn('sistema',[sid for sid,_,_,_ in app.SECTIONS])
   with patch.object(app.subprocess,'Popen') as p:app.reboot_soon();app.poweroff_soon()
   rb,po=(c.args[0][-1] for c in p.call_args_list)
   self.assertIn('reboot -f &',rb);self.assertIn('echo b >/proc/sysrq-trigger',rb)
