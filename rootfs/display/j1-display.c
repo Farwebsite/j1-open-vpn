@@ -184,6 +184,10 @@ static char resp[131072], screen_id[128] = "home", back[128], title[128];
 static int busy, shown = 1, wakes;
 /* lock screen (K line from web.py): set when the screen goes off, a swipe opens it */
 static int lock_on, locked, lock_drag, lock_x;
+/* with a code the J1 starts locked: on the first K line, as web.py may still
+ * be starting when the screen does (its first replies fail) */
+static int k_seen;
+static void set_deadline(void);
 /* optional code (K line, 3rd field): after the swipe a keypad asks for it;
  * web.py checks it (the J1 keeps only a hash) and limits the attempts */
 static int lock_pin, lock_blocked, lock_stage, pin_down = -1;   /* blocked: too many misses, only the web panel opens it */
@@ -299,7 +303,8 @@ static void parse(int keep_dirty) {
 			if (v < 13 || v > 255) v = 143;
 			if (v != bright) { bright = v; if (shown && !dimmed) set_bright(); }
 		}
-		else if (fld[0][0] == 'K') { lock_on = fld[1] && *fld[1] == '1'; lock_pin = lock_on && fld[2] && *fld[2] == '1'; lock_blocked = lock_pin && fld[3] && *fld[3] == '1'; if (!lock_on) locked = 0; }
+		else if (fld[0][0] == 'K') { lock_on = fld[1] && *fld[1] == '1'; lock_pin = lock_on && fld[2] && *fld[2] == '1'; lock_blocked = lock_pin && fld[3] && *fld[3] == '1'; if (!lock_on) locked = 0;
+			if (!k_seen) { k_seen = 1; if (lock_pin) { locked = 1; lock_drag = lock_x = 0; set_deadline(); } } }
 		else if (fld[0][0] && (fld[1] || fld[0][0] == 'G')) {
 			struct el *e = &els[nel++]; memset(e, 0, sizeof *e);
 			e->t = fld[0][0]; e->a = fld[1] ? fld[1] : (char *)""; e->b = fld[2]; e->c = fld[3]; e->d = fld[4];
@@ -1199,7 +1204,6 @@ int main(void) {
 	light(1); deadline = now() + 30; last_touch = now();
 	/* J1_UI_START=nav:vpn J1_UI_KB=1: start on a screen / keyboard (testing) */
 	send_action(getenv("J1_UI_START") ? getenv("J1_UI_START") : "nav:home", 1);
-	if (lock_pin) { locked = 1; poke(); render(); }   /* with a code the J1 starts locked */
 	if (!idle_s) poke();
 	if (getenv("J1_UI_KB")) for (int i = 0; i < nel; i++) if (els[i].t == 'F') { open_kb(&els[i]); render(); break; }
 	set_next_clock();
