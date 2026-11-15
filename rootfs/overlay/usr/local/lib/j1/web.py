@@ -39,6 +39,22 @@ code{background:var(--field);padding:1px 6px;border-radius:6px;font-size:.85em;o
 .list .who{flex:1;min-width:0;overflow-wrap:anywhere}.list .who small{display:block}.list form{margin:0;padding:0;background:none}
 .list .tile{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--field)}
 .btn2{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:99px;background:var(--field);color:var(--txt);font-weight:600;font-size:15px}.btn2 .ic{width:17px;height:17px}
+.whead{display:flex;align-items:center;justify-content:space-between;margin:24px 4px 6px}.whead h3{margin:0}
+.whead form{margin:0;padding:0;background:none}.whead button{width:auto;margin:0;padding:4px 0;border-radius:0;background:none;color:var(--acc);font-size:15px;font-weight:600}
+.whead button[disabled]{color:var(--mut);opacity:1}
+.wcard{margin:12px 0;background:var(--grp);border-radius:16px;overflow:hidden}
+.wcard>form{margin:0;padding:2px 16px;background:none}.wcard>form label{margin:10px 0}
+.wcard details{margin:0;position:relative}.wcard details+details::before,.wcard>form+details::before{content:"";position:absolute;top:0;right:0;left:54px;border-top:.5px solid var(--sep)}
+.wcard summary{display:flex;align-items:center;gap:14px;padding:12px 16px;color:var(--txt);list-style:none;cursor:pointer}.wcard summary::-webkit-details-marker{display:none}
+.wcard summary:active,.wcard details[open] summary{background:#2c2c2e}
+.wcard .who{flex:1;min-width:0;overflow-wrap:anywhere}.wcard .who small{display:block;margin:2px 0 0}
+.wcard .lk{width:15px;height:15px;color:var(--mut);flex:none}.wcard .ok{color:var(--acc);font-weight:700;width:18px;text-align:center;flex:none}
+.wcard details form{margin:0;padding:8px 16px 14px 54px;border-radius:0;background:#2c2c2e}.wcard details form label{margin:2px 0 6px}
+.wcard details input:not([type=checkbox]){background:#3a3a3c}.wcard details button{margin-top:12px}
+.wcard .add summary{color:var(--acc)}.wcard .add .plus{width:24px;text-align:center;font-size:24px;line-height:1;flex:none}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;width:24px;height:18px;flex:none}.bars i{width:4px;border-radius:1px;background:#48484a}
+.bars i:nth-child(1){height:25%}.bars i:nth-child(2){height:50%}.bars i:nth-child(3){height:75%}.bars i:nth-child(4){height:100%}
+.bars.s1 i:nth-child(-n+1),.bars.s2 i:nth-child(-n+2),.bars.s3 i:nth-child(-n+3),.bars.s4 i{background:var(--acc)}
 .list button{width:auto;margin:0;padding:7px 12px;border-radius:99px;font-size:15px}
 .notice{position:fixed;z-index:30;top:10px;left:50%;width:min(92vw,420px);margin:0;padding:13px 16px;border-radius:16px;background:rgba(44,44,46,.94);-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);color:var(--txt);font-size:15px;box-shadow:0 10px 30px rgba(0,0,0,.5);transform:translate(-50%,0);animation:toast 6s var(--ease) forwards;pointer-events:none}
 .notice::before{content:"\\2713";color:var(--grn);font-weight:700;margin-right:8px}.notice.err::before{content:"!";color:var(--red)}.notice.err{animation-duration:10s}
@@ -114,7 +130,9 @@ SECTIONS=(('wifi','Wi-Fi','wifi','#30d158'),('red','Red de configuración','ap',
           ('pantalla','Pantalla de bloqueo','lock','#98989d'),('hora','Zona horaria','tz','#ff9f0a'),('ssh','SSH','ssh','#98989d'),('vigilantes','Vigilantes','vpn','#ff453a'),
           ('https','HTTPS','https','#30d158'),('copia','Copia de seguridad','backup','#30d158'),('actualizar','Actualizar','update','#0a84ff'),('sistema','Sistema','power','#ff453a'))
 # moves the page dots of the phone home screen (the swipe itself is CSS)
-DOTS_JS=(b"(function(){var n=document.querySelector('nav.pages'),d=document.querySelectorAll('.dots i');if(!n||!d.length)return;"
+DOTS_JS=(b"document.querySelectorAll('button[data-busy]').forEach(function(b){b.form.addEventListener('submit',function(){setTimeout(function(){b.textContent=b.dataset.busy;b.disabled=true},0)})});"
+         b"document.querySelectorAll('input[data-auto]').forEach(function(e){e.addEventListener('change',function(){e.form.submit()})});"
+         b"(function(){var n=document.querySelector('nav.pages'),d=document.querySelectorAll('.dots i');if(!n||!d.length)return;"
          b"function u(){var p=Math.round(n.scrollLeft/n.clientWidth);for(var i=0;i<d.length;i++)d[i].className=i==p?'on':''}"
          b"n.addEventListener('scroll',u,{passive:true});d.forEach(function(e,i){e.addEventListener('click',function(){n.scrollTo({left:i*n.clientWidth,behavior:'smooth'})})})})();")
 CSS+=''.join('body:has(#%s:target) nav a[href="#%s"]%s{background:#0a64d9}'%(sid,sid,',body:not(:has(main section:target)) nav a[href="#wifi"]' if sid=='wifi' else '') for sid,_,_,_ in SECTIONS).join(('@media(min-width:900px){','}'))
@@ -375,6 +393,44 @@ def scan_networks():
     RUNTIME['networks']=sorted(found.values(),key=lambda x:-x['signal'])
     RUNTIME['scan']=str(len(found))+' redes encontradas'
 
+# signal (dBm) -> bars 1-4 and a word, for the list of scanned networks
+def wifi_level(dbm):
+    n=4 if dbm>=-55 else 3 if dbm>=-67 else 2 if dbm>=-78 else 1
+    return n,('Débil','Regular','Buena','Excelente')[n-1]
+def wifi_saved_hex():
+    try:m=re.search(r'^\s*ssid=([0-9a-f]+)\s*$',(STATE/'wifi.conf').read_text(),re.M)
+    except OSError:return ''
+    return m.group(1) if m else ''
+# one network as a row that opens in place: password (if it has one) and Conectar
+def wifi_row(hexname,name,info,secure,signal=None,mark=''):
+    lv=wifi_level(signal)[0] if signal is not None else 0
+    return ('<details name=wnet><summary>'+(('<span class="bars s'+str(lv)+'" title="'+str(signal)+' dBm"><i></i><i></i><i></i><i></i></span>') if lv else '<span class=bars></span>')+
+        '<span class=who><b>'+esc(name)+'</b><small>'+esc(info)+'</small></span>'+(icon('lock').replace('class=ic','class="ic lk"') if secure else '')+mark+'</summary>'
+        '<form method=post>'+hidden()+'<input type=hidden name=action value=wifi><input type=hidden name=ssidhex value="'+hexname+'">'+
+        ('<label>Contraseña<input type=password name=password maxlength=63 minlength=8 autocomplete=new-password required></label>' if secure else '<input type=hidden name=open value=1><small>Red abierta: el tráfico Wi-Fi no va cifrado (la VPN sí).</small>')+
+        '<button>Conectar</button></form></details>')
+def wifi_section():
+    try:wifi=(RUN/'wifi-summary').read_text().strip()
+    except FileNotFoundError:wifi='Wi-Fi: sin configurar'
+    off=(STATE/'wifi-off').exists();saved=wifi_saved_hex();nets=RUNTIME['networks']
+    out=['<section id=wifi><h2>Conexión Wi-Fi</h2><div class=wcard><form method=post>'+hidden()+'<input type=hidden name=action value=wifion>'
+         '<label><input type=checkbox name=on value=1 data-auto'+('' if off else ' checked')+'> <b>Wi-Fi</b></label><noscript><button class=sec>Guardar</button></noscript></form>']
+    if saved and not off:
+        n=next((x for x in nets if x['hex']==saved),None);state=wifi.split(': ',1)[-1]
+        ip=re.search(r'\d+\.\d+\.\d+\.\d+',wifi)
+        out.append(wifi_row(saved,bytes.fromhex(saved).decode('utf8','replace'),('Conectada · '+ip.group(0)) if ip else state[:1].upper()+state[1:],
+                            n['secure'] if n else True,n['signal'] if n else None,'<span class=ok>&#10003;</span>' if ip else ''))
+    out.append('</div>')
+    if off:return ''.join(out)+'<p class=muted>Apagada: el J1 usa el cable y la red de configuración. Actívala para ver las redes.</p></section>'
+    out.append('<div class=whead><h3>Redes disponibles</h3><form method=post>'+hidden()+'<input type=hidden name=action value=scan>'
+               '<button data-busy="Buscando…">Buscar</button></form></div>')
+    others=[x for x in nets if x['hex']!=saved]
+    out.append('<div class=wcard>'+''.join(wifi_row(x['hex'],x['name'],wifi_level(x['signal'])[1]+(' · protegida' if x['secure'] else ' · abierta'),x['secure'],x['signal']) for x in others))
+    out.append('<details name=wnet class=add><summary><span class=plus>+</span><span class=who>Otra red (oculta o escribir el nombre)</span></summary>'
+               '<form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off required></label>'
+               '<label>Contraseña<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Conectar</button></form></details></div>')
+    if not others:out.append('<p class=muted>'+('Ninguna otra red cerca.' if RUNTIME['networks'] else 'Pulsa Buscar para ver las redes cercanas.')+'</p>')
+    return ''.join(out)+'<p><small>La red de configuración sigue disponible mientras cambias de red.</small></p></section>'
 def wifi_save(form):
     manual=form.get('ssid','').strip()
     if manual:b=manual.encode('utf8')
@@ -383,6 +439,7 @@ def wifi_save(form):
         except ValueError:raise ValueError('Selecciona una red')
     if not 1<=len(b)<=32 or b'\x00' in b:raise ValueError('Selecciona una red o indica un SSID valido')
     password=form.get('password','');is_open=form.get('open')=='1'
+    if not manual and any(n['hex']==b.hex() and not n['secure'] for n in RUNTIME['networks']):is_open=True
     if is_open:
         security='    key_mgmt=NONE\n'
     else:
@@ -693,9 +750,7 @@ def page(message='',error=False):
     vpn_ok=RUNTIME['vpn'].startswith('Activo');wifi_ok=bool(re.search(r'\d+\.\d+\.\d+\.\d+',wifi))
     out=['<!doctype html><html lang=es><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=theme-color content="#000000"><title>J1 VPN</title><style>'+CSS+'</style>'
          '<div class=app id=top><aside class=root>'+home_html()+         '</aside><main>'+(note if message else '')]
-    out+=['<section id=wifi><h2>Conexión Wi-Fi</h2><p>'+esc(wifi)+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=scan><button class=sec>Buscar redes</button></form><p class=muted>'+esc(RUNTIME['scan'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=wifi><label for=net>Redes encontradas</label><select name=ssidhex id=net><option value="">Selecciona una red</option>']
-    for n in RUNTIME['networks']:out.append('<option value="'+n['hex']+'">'+esc(n['name'])+' · '+str(n['signal'])+' dBm'+('' if n['secure'] else ' · abierta')+'</option>')
-    out+=['</select><details><summary>Red oculta o nombre manual</summary><label>Nombre de la red<input name=ssid maxlength=32 autocomplete=off></label></details><label>Contraseña Wi-Fi<input type=password name=password maxlength=63 autocomplete=new-password></label><label><input type=checkbox name=open value=1> Red abierta, sin contraseña</label><button>Guardar y conectar</button></form><p><small>La red de configuración se mantiene disponible.</small></p></section>',usb_section(),bat_section()]
+    out+=[wifi_section(),usb_section(),bat_section()]
     out+=['<section id=vpn><h2>WireGuard</h2><p>'+esc(RUNTIME['vpn'])+'</p><form method=post>'+hidden()+'<input type=hidden name=action value=vpn><label>Puerto UDP<input type=number name=port min=1 max=65535 required value="'+str(v['port'])+'"></label><label>Dominio o IP de conexión<input name=endpoint value="'+esc(v.get('endpoint',''))+'" placeholder="vpn2.tudominio.com"></label><small>Vacío: usa el dominio de Cloudflare o la IP de acceso actual. Web en TCP 80; VPN en UDP. Si cambias el puerto o dominio, descarga otra vez los perfiles.</small><br><button>Guardar puerto y dirección</button></form><h3>Clientes</h3><ul class=list>'+('' if v['clients'] else '<li><small>Ninguno todavía.</small></li>')]
     peers=wg_peers()
     for c in v['clients']:
@@ -883,6 +938,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not hmac.compare_digest(f.get('csrf',''),CSRF):raise ValueError('Recarga la página y vuelve a intentarlo')
             action=f.get('action')
             if action=='scan':scan_networks();message=RUNTIME['scan']
+            elif action=='wifion':wifi_enable(f.get('on')=='1');message='Wi-Fi '+('activada.' if f.get('on')=='1' else 'apagada.')
             elif action=='wifi':wifi_save(f);message='Red guardada. Espera unos segundos y recarga para ver el estado.'
             elif action=='client':client_create(f.get('name',''));message='Cliente creado. Descarga su perfil .conf.'
             elif action=='usb':

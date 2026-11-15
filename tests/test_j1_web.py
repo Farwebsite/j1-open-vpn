@@ -27,7 +27,7 @@ class Tests(unittest.TestCase):
  def test_private_values_not_in_page(self):
   app.save('vpn.json',{'port':80,'endpoint':'','private_key':'SERVER_SECRET','public_key':'pub','clients':[]})
   app.save('cloudflare.json',{'token':'API_SECRET'})
-  s=app.page().decode();self.assertNotIn('SERVER_SECRET',s);self.assertNotIn('API_SECRET',s);self.assertIn('Buscar redes',s)
+  s=app.page().decode();self.assertNotIn('SERVER_SECRET',s);self.assertNotIn('API_SECRET',s);self.assertIn('Redes disponibles',s)
  def test_profile_contains_only_chosen_client(self):
   app.save('vpn.json',{'port':80,'endpoint':'vpn.example.com','private_key':'SERVER_SECRET','public_key':'serverpub','clients':[{'id':'a','ip':2,'private_key':'CLIENT_A','psk':'PSK_A'},{'id':'b','ip':3,'private_key':'CLIENT_B','psk':'PSK_B'}]})
   s=app.client_profile('a','192.168.77.1');self.assertIn('CLIENT_A',s);self.assertNotIn('CLIENT_B',s);self.assertNotIn('SERVER_SECRET',s);self.assertIn('vpn.example.com:80',s);self.assertIn('MTU = 1420',s)
@@ -240,6 +240,32 @@ class Tests(unittest.TestCase):
   self.assertIn(b'l\tJ1 Open VPN \xfa (c) 2026 Farweb\t',home);self.assertNotIn(b'appliance',home)
   menu=app.ui_request(b'a=nav%3Apower')
   for act in (b'sys.poweroff',b'sys.reboot',b'nav:home'):self.assertIn(b'B\t'+act+b'\t',menu)
+ def test_wifi_section_rows(self):
+  app.RUNTIME['networks']=[]
+  s=app.wifi_section();self.assertIn('Pulsa Buscar para ver',s);self.assertIn('name=action value=wifion><label><input type=checkbox name=on value=1 data-auto checked>',s)
+  home,cafe,vec=b'Casa'.hex(),b'Cafe <x>'.hex(),b'Vecino'.hex()
+  app.RUNTIME['networks']=[{'hex':home,'name':'Casa','signal':-50,'secure':True},{'hex':vec,'name':'Vecino','signal':-70,'secure':True},{'hex':cafe,'name':'Cafe <x>','signal':-80,'secure':False}]
+  (app.STATE/'wifi.conf').write_text('network={\n    ssid='+home+'\n}\n');(app.RUN/'wifi-summary').write_text('Wi-Fi: 10.0.0.2 (DHCP)\n')
+  s=app.wifi_section()
+  self.assertEqual(s.count('<details name=wnet>'),3);self.assertEqual(s.count('value="'+home+'"'),1)   # saved one on top, not again in the list
+  self.assertIn('<b>Casa</b><small>Conectada · 10.0.0.2</small>',s);self.assertIn('&#10003;',s)
+  self.assertIn('<b>Cafe &lt;x&gt;</b><small>Débil · abierta</small>',s);self.assertIn('<b>Vecino</b><small>Regular · protegida</small>',s)
+  row=s[s.index('value="'+cafe+'"'):];row=row[:row.index('</details>')]
+  self.assertIn('name=open value=1',row);self.assertNotIn('type=password',row)
+  row=s[s.index('value="'+vec+'"'):];row=row[:row.index('</details>')]
+  self.assertIn('type=password name=password',row);self.assertIn('required',row)
+  self.assertIn('Otra red',s);self.assertNotIn('<select',s);self.assertIn('data-busy="Buscando…">Buscar</button>',s)
+  (app.RUN/'wifi-summary').write_text('Wi-Fi: en reserva (la IP la usa el cable)\n')
+  self.assertIn('<small>En reserva (la IP la usa el cable)</small>',app.wifi_section())
+  (app.STATE/'wifi-off').write_text('1\n');s=app.wifi_section()
+  self.assertIn('data-auto>',s);self.assertIn('Apagada',s);self.assertNotIn('<details',s)
+  with patch.object(app,'flag'),patch.object(app,'log'):
+   app.wifi_save({'ssidhex':cafe,'open':'1'})
+   self.assertIn('key_mgmt=NONE',(app.STATE/'wifi.conf').read_text())
+   with self.assertRaises(ValueError):app.wifi_save({'ssidhex':home})
+   app.wifi_save({'ssidhex':home,'password':'una clave larga'})
+   self.assertIn('key_mgmt=WPA-PSK',(app.STATE/'wifi.conf').read_text())
+  app.RUNTIME['networks']=[]
  def test_system_section_reboot_and_poweroff_with_fallback(self):
   s=app.system_section()
   for act in ('reboot','poweroff'):self.assertIn('name=action value='+act+'><label><input type=checkbox name=confirm value=1 required>',s)

@@ -46,6 +46,8 @@ En la pantalla, **Panel web** (baldosa de la segunda página del inicio):
 - **Cifrado HTTPS** (desactivado de serie): el panel va cifrado también en la red de casa, en `https://`. El certificado lo crea el propio J1, así que el navegador avisa la primera vez: acéptalo si la huella SHA-256 coincide con la de la pantalla o la del panel (sección *HTTPS*). Con HTTPS activado, `http://` solo redirige a `https://`.
 - **IP de la Wi-Fi / IP del cable:** accesos directos para poner esa IP por DHCP o fija.
 
+En el panel, la sección **Wi-Fi** funciona como los ajustes de un móvil: interruptor de Wi-Fi, tu red debajo (conectada, en reserva por el cable...), y en *Redes disponibles* **Buscar** a la derecha. Al tocar una red se abre ahí mismo: contraseña si la tiene y **Conectar**. *Otra red* sirve para redes ocultas o para escribir el nombre.
+
 El panel **no** debe publicarse en Internet: no redirijas el TCP 80 en el router.
 
 **Conexión USB con el PC:** el J1 aparece como una tarjeta de red USB (RNDIS) y le da al PC la IP `192.168.77.2` automáticamente. Windows 10/11 la reconoce sola. Si en el Administrador de dispositivos sale como dispositivo desconocido (*J13G-Linux-USB*), actualiza su driver: *Buscar en mi equipo → Elegir de una lista → Adaptadores de red → Microsoft → Dispositivo compatible con NDIS remoto*. Si el PC no recibe IP, ponle a mano `192.168.77.2`, máscara `255.255.255.252`.
